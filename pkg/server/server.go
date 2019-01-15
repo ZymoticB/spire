@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/armon/go-metrics/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	common "github.com/spiffe/spire/pkg/common/catalog"
 	"github.com/spiffe/spire/pkg/common/profiling"
@@ -69,6 +71,12 @@ type Config struct {
 
 	// Port used by the pprof web server when ProfilingEnabled == true
 	ProfilingPort int
+
+	// If true enables exporting metrics compatible with prometheus.
+	PrometheusEnabled bool
+
+	// Port used by the prometheus exporter.
+	PrometheusPort int
 
 	// Frequency in seconds by which each profile file will be generated.
 	ProfilingFreq int
@@ -128,9 +136,23 @@ func (s *Server) run(ctx context.Context) (err error) {
 		defer stopProfiling()
 	}
 
+	var sinks []telemetry.Sink
+	if s.config.PrometheusEnabled {
+		promSink, err := prometheus.NewPrometheusSink()
+		if err != nil {
+			return err
+		}
+
+		sinks = append(sinks, promSink)
+
+		stopPrometheus := s.setupPrometheus(ctx)
+		defer stopPrometheus()
+	}
+
 	metrics := telemetry.NewMetrics(&telemetry.MetricsConfig{
 		Logger:      s.config.Log.WithField("subsystem_name", "telemetry").Writer(),
 		ServiceName: "spire_server",
+		Sinks:       sinks,
 	})
 	defer metrics.Stop()
 
@@ -221,6 +243,38 @@ func (s *Server) setupProfiling(ctx context.Context) (stop func()) {
 			}
 		}()
 	}
+
+	return func() {
+		cancel()
+		wg.Wait()
+	}
+}
+
+func (s *Server) setupPrometheus(ctx context.Context) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+
+	server := http.Server{
+		Addr:    fmt.Sprintf("localhost:%d", s.config.PrometheusPort),
+		Handler: promhttp.Handler(),
+	}
+
+	// kick off a goroutine to serve the prometheus endpoints and one to
+	// gracefully shut down the server when prometheus is being torn down
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.config.Log.Infof("starting prometheus server on %q", server.Addr)
+		if err := server.ListenAndServe(); err != nil {
+			s.config.Log.Warnf("unable to serve prometheus server: %v", err)
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		server.Shutdown(ctx)
+	}()
 
 	return func() {
 		cancel()

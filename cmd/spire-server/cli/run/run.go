@@ -50,11 +50,13 @@ type serverConfig struct {
 	ConfigPath string
 
 	// Undocumented configurables
-	ProfilingEnabled bool     `hcl:"profiling_enabled"`
-	ProfilingPort    int      `hcl:"profiling_port"`
-	ProfilingFreq    int      `hcl:"profiling_freq"`
-	ProfilingNames   []string `hcl:"profiling_names"`
-	Umask            string   `hcl:"umask"`
+	ProfilingEnabled  bool     `hcl:"profiling_enabled"`
+	ProfilingPort     int      `hcl:"profiling_port"`
+	ProfilingFreq     int      `hcl:"profiling_freq"`
+	ProfilingNames    []string `hcl:"profiling_names"`
+	PrometheusEnabled bool     `hcl:"prometheus_enabled"`
+	PrometheusPort    int      `hcl:"prometheus_port"`
+	Umask             string   `hcl:"umask"`
 }
 
 type caSubjectConfig struct {
@@ -254,6 +256,16 @@ func mergeConfig(orig *server.Config, cmd *runConfig) error {
 
 		if len(cmd.Server.ProfilingNames) > 0 {
 			orig.ProfilingNames = cmd.Server.ProfilingNames
+		}
+	}
+
+	if cmd.Server.PrometheusEnabled {
+		orig.PrometheusEnabled = cmd.Server.PrometheusEnabled
+	}
+
+	if orig.PrometheusEnabled {
+		if cmd.Server.PrometheusPort > 0 {
+			orig.PrometheusPort = cmd.Server.PrometheusPort
 		}
 	}
 
