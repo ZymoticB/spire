@@ -40,6 +40,7 @@ require (
 	github.com/onsi/gomega v1.4.3 // indirect
 	github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c // indirect
 	github.com/posener/complete v1.1.2 // indirect
+	github.com/prometheus/client_golang v0.9.2
 	github.com/shirou/gopsutil v0.0.0-20180801053943-8048a2e9c577
 	github.com/shirou/w32 v0.0.0-20160930032740-bb4de0191aa4 // indirect
 	github.com/sirupsen/logrus v1.0.6
@@ -49,7 +50,7 @@ require (
 	github.com/stretchr/testify v1.2.2
 	github.com/zeebo/errs v1.0.0
 	golang.org/x/crypto v0.0.0-20180820150726-614d502a4dac // indirect
-	golang.org/x/net v0.0.0-20180906233101-161cd47e91fd
+	golang.org/x/net v0.0.0-20181201002055-351d144fa1fc
 	golang.org/x/sync v0.0.0-20181221193216-37e7f081c4d4 // indirect
 	golang.org/x/sys v0.0.0-20180909124046-d0be0721c37e
 	golang.org/x/time v0.0.0-20180412165947-fbb02b2291d2
