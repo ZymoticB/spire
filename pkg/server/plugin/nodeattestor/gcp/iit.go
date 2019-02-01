@@ -28,11 +28,47 @@ type IITAttestorConfig struct {
 	ProjectIDWhitelist []string `hcl:"projectid_whitelist"`
 }
 
-type IITAttestorPlugin struct {
+type BaseIITAttestorPlugin struct {
 	tokenKeyRetriever tokenKeyRetriever
+}
 
-	mtx    sync.Mutex
+type IITAttestorPlugin struct {
+	BaseIITAttestorPlugin
+
 	config *IITAttestorConfig
+	mtx    sync.Mutex
+}
+
+func (p *BaseIITAttestorPlugin) ValidateIdentityAndExtractMetadata(stream nodeattestor.Attest_PluginStream, pluginName string) (gcp.ComputeEngine, error) {
+	req, err := stream.Recv()
+	if err != nil {
+		return gcp.ComputeEngine{}, err
+	}
+
+	attestationData := req.GetAttestationData()
+	if attestationData == nil {
+		return gcp.ComputeEngine{}, newError("request missing attestation data")
+	}
+
+	if attestationData.Type != gcp.PluginName {
+		return gcp.ComputeEngine{}, newErrorf("unexpected attestation data type %q", attestationData.Type)
+	}
+
+	if req.AttestedBefore {
+		return gcp.ComputeEngine{}, newError("instance ID has already been attested")
+	}
+
+	identityToken := &gcp.IdentityToken{}
+	_, err = jwt.ParseWithClaims(string(req.GetAttestationData().Data), identityToken, p.tokenKeyRetriever.retrieveKey)
+	if err != nil {
+		return gcp.ComputeEngine{}, newErrorf("unable to parse/validate the identity token: %v", err)
+	}
+
+	if identityToken.Audience != tokenAudience {
+		return gcp.ComputeEngine{}, newErrorf("unexpected identity token audience %q", identityToken.Audience)
+	}
+
+	return identityToken.Google.ComputeEngine, nil
 }
 
 func (p *IITAttestorPlugin) Attest(stream nodeattestor.Attest_PluginStream) error {
@@ -41,46 +77,23 @@ func (p *IITAttestorPlugin) Attest(stream nodeattestor.Attest_PluginStream) erro
 		return err
 	}
 
-	req, err := stream.Recv()
+	identityMetadata, err := p.ValidateIdentityAndExtractMetadata(stream, gcp.PluginName)
 	if err != nil {
 		return err
 	}
 
-	attestationData := req.GetAttestationData()
-	if attestationData == nil {
-		return newError("request missing attestation data")
-	}
-
-	if attestationData.Type != gcp.PluginName {
-		return newErrorf("unexpected attestation data type %q", attestationData.Type)
-	}
-
-	if req.AttestedBefore {
-		return newError("instance ID has already been attested")
-	}
-
-	identityToken := &gcp.IdentityToken{}
-	_, err = jwt.ParseWithClaims(string(req.GetAttestationData().Data), identityToken, p.tokenKeyRetriever.retrieveKey)
-	if err != nil {
-		return newErrorf("unable to parse/validate the identity token: %v", err)
-	}
-
-	if identityToken.Audience != tokenAudience {
-		return newErrorf("unexpected identity token audience %q", identityToken.Audience)
-	}
-
 	projectIDMatchesWhitelist := false
 	for _, projectID := range c.ProjectIDWhitelist {
-		if identityToken.Google.ComputeEngine.ProjectID == projectID {
+		if identityMetadata.ProjectID == projectID {
 			projectIDMatchesWhitelist = true
 			break
 		}
 	}
 	if !projectIDMatchesWhitelist {
-		return newErrorf("identity token project ID %q is not in the whitelist", identityToken.Google.ComputeEngine.ProjectID)
+		return newErrorf("identity token project ID %q is not in the whitelist", identityMetadata.ProjectID)
 	}
 
-	spiffeID := gcp.MakeSpiffeID(c.trustDomain, identityToken.Google.ComputeEngine.ProjectID, identityToken.Google.ComputeEngine.InstanceID)
+	spiffeID := gcp.MakeSpiffeID(c.trustDomain, identityMetadata.ProjectID, identityMetadata.InstanceID)
 
 	resp := &nodeattestor.AttestResponse{
 		Valid:        true,
@@ -127,7 +140,9 @@ func (*IITAttestorPlugin) GetPluginInfo(ctx context.Context, req *spi.GetPluginI
 
 func NewIITAttestorPlugin() *IITAttestorPlugin {
 	return &IITAttestorPlugin{
-		tokenKeyRetriever: newGooglePublicKeyRetriever(googleCertURL),
+		BaseIITAttestorPlugin: BaseIITAttestorPlugin{
+			tokenKeyRetriever: newGooglePublicKeyRetriever(googleCertURL),
+		},
 	}
 }
 

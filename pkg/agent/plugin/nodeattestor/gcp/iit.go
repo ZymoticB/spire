@@ -19,13 +19,16 @@ import (
 )
 
 const (
-	identityTokenURLHost  = "metadata.google.internal"
-	identityTokenURLPath  = "/computeMetadata/v1/instance/service-accounts/default/identity"
-	identityTokenAudience = "spire-gcp-node-attestor"
+	identityTokenURLHost         = "metadata.google.internal"
+	identityTokenURLPathTemplate = "/computeMetadata/v1/instance/service-accounts/%s/identity"
+	identityTokenAudience        = "spire-gcp-node-attestor"
+
+	defaultServiceAccount = "default"
 )
 
 type IITAttestorConfig struct {
-	trustDomain string
+	trustDomain    string
+	ServiceAccount string `hcl:"service_account"`
 }
 
 type IITAttestorPlugin struct {
@@ -35,20 +38,20 @@ type IITAttestorPlugin struct {
 	config *IITAttestorConfig
 }
 
-func identityTokenURL(host string) string {
+func identityTokenURL(host, serviceAccount string) string {
 	query := url.Values{}
 	query.Set("audience", identityTokenAudience)
 	query.Set("format", "full")
 	url := &url.URL{
 		Scheme:   "http",
 		Host:     host,
-		Path:     identityTokenURLPath,
+		Path:     fmt.Sprintf(identityTokenURLPathTemplate, serviceAccount),
 		RawQuery: query.Encode(),
 	}
 	return url.String()
 }
 
-func retrieveInstanceIdentityToken(url string) ([]byte, error) {
+func RetrieveInstanceIdentityToken(url string) ([]byte, error) {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -79,7 +82,7 @@ func (p *IITAttestorPlugin) FetchAttestationData(stream nodeattestor.FetchAttest
 		return err
 	}
 
-	docBytes, err := retrieveInstanceIdentityToken(identityTokenURL(p.tokenHost))
+	docBytes, err := RetrieveInstanceIdentityToken(identityTokenURL(p.tokenHost, c.ServiceAccount))
 	if err != nil {
 		return newErrorf("unable to retrieve identity token: %v", err)
 	}
@@ -133,10 +136,14 @@ func (p *IITAttestorPlugin) Configure(ctx context.Context, req *spi.ConfigureReq
 	if req.GlobalConfig.TrustDomain == "" {
 		return nil, newError("trust_domain is required")
 	}
+	config.trustDomain = req.GlobalConfig.TrustDomain
+
+	if config.ServiceAccount == "" {
+		config.ServiceAccount = defaultServiceAccount
+	}
 
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
-	config.trustDomain = req.GlobalConfig.TrustDomain
 	p.config = config
 
 	return &spi.ConfigureResponse{}, nil

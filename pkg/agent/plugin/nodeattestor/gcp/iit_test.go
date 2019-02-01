@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,12 +28,14 @@ type Suite struct {
 }
 
 func (s *Suite) SetupTest() {
+	serviceAccount := "test-service-account"
+
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Metadata-Flavor") != "Google" {
 			http.Error(w, "unexpected flavor", http.StatusInternalServerError)
 			return
 		}
-		if req.URL.Path != identityTokenURLPath {
+		if req.URL.Path != fmt.Sprintf(identityTokenURLPathTemplate, serviceAccount) {
 			http.Error(w, "unexpected path", http.StatusInternalServerError)
 			return
 		}
@@ -56,6 +59,9 @@ func (s *Suite) SetupTest() {
 		GlobalConfig: &plugin.ConfigureRequest_GlobalConfig{
 			TrustDomain: "example.org",
 		},
+		Configuration: fmt.Sprintf(`
+service_account = "%s"
+`, serviceAccount),
 	})
 	s.Require().NoError(err)
 	s.status = http.StatusOK
