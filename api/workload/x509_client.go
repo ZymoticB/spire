@@ -29,6 +29,9 @@ type X509ClientConfig struct {
 
 	// A logging interface which is satisfied by stdlib logger. Can be nil.
 	Log logrus.StdLogger
+
+	// Headers are additional headers to send with RPC requests to the SPIFFE Workload API.
+	Headers map[string]string
 }
 
 // NewX509Client creates a new Workload API client for the X509SVID service.

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	workload_dial "github.com/spiffe/spire/api/workload/dial"
+	"github.com/spiffe/spire/internal/spiffecontext"
 	"github.com/spiffe/spire/proto/api/workload"
-	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -51,8 +51,7 @@ func newWorkloadClient(ctx context.Context, socketPath string, timeout time.Dura
 }
 
 func (c *workloadClient) prepareContext(ctx context.Context) (context.Context, func()) {
-	header := metadata.Pairs("workload.spiffe.io", "true")
-	ctx = metadata.NewOutgoingContext(ctx, header)
+	ctx = spiffecontext.NewOutgoing(ctx, nil)
 	if c.timeout > 0 {
 		return context.WithTimeout(ctx, c.timeout)
 	}

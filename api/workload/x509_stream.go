@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/spiffe/spire/api/workload/dial"
+	"github.com/spiffe/spire/internal/spiffecontext"
 	"github.com/spiffe/spire/proto/api/workload"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 // x509Stream maintains an open connection to the X509-SVID service of the SPIFFE Workload API and
@@ -144,8 +144,7 @@ func (x *x509Stream) newClient() (workload.SpiffeWorkloadAPIClient, error) {
 func (x *x509Stream) newStream() (workload.SpiffeWorkloadAPI_FetchX509SVIDClient, context.CancelFunc, error) {
 	bo := newBackoff(x.c.Timeout)
 
-	ctx := context.Background()
-	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("workload.spiffe.io", "true"))
+	ctx := spiffecontext.NewOutgoing(context.Background(), x.c.Headers)
 	ctx, cancel := context.WithCancel(ctx)
 
 	streamChan := make(chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient, 1)

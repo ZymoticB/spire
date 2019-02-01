@@ -13,6 +13,7 @@ import (
 	"github.com/golang/protobuf/jsonpb"
 	structpb "github.com/golang/protobuf/ptypes/struct"
 	"github.com/sirupsen/logrus"
+	"github.com/spiffe/spire/internal/spiffecontext"
 	attestor "github.com/spiffe/spire/pkg/agent/attestor/workload"
 	"github.com/spiffe/spire/pkg/agent/catalog"
 	"github.com/spiffe/spire/pkg/agent/manager"
@@ -27,7 +28,6 @@ import (
 	"github.com/zeebo/errs"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -281,8 +281,7 @@ func (h *Handler) composeJWTBundlesResponse(update *cache.WorkloadUpdate) (*work
 }
 
 func (h *Handler) startCall(ctx context.Context) (int32, []*common.Selector, telemetry.Metrics, func(), error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok || len(md["workload.spiffe.io"]) != 1 || md["workload.spiffe.io"][0] != "true" {
+	if !spiffecontext.IsValidIncomingContext(ctx) {
 		return 0, nil, nil, nil, status.Errorf(codes.InvalidArgument, "Security header missing from request")
 	}
 

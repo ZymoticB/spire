@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spiffe/spire/internal/spiffecontext"
 	workload "github.com/spiffe/spire/proto/api/workload"
-	"google.golang.org/grpc/metadata"
 )
 
 // Workload is the component that consumes Workload API and renews certs
@@ -41,8 +41,7 @@ func (w *Workload) RunDaemon(ctx context.Context) error {
 	timeoutTimer := time.NewTimer(time.Second * time.Duration(w.timeout))
 	defer timeoutTimer.Stop()
 
-	header := metadata.Pairs("workload.spiffe.io", "true")
-	ctx = metadata.NewOutgoingContext(ctx, header)
+	ctx = spiffecontext.NewOutgoing(ctx, nil)
 
 	stream, err := w.workloadClient.FetchX509SVID(ctx, &workload.X509SVIDRequest{})
 	if err != nil {
