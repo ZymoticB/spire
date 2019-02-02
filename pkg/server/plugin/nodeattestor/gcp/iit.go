@@ -140,9 +140,13 @@ func (*IITAttestorPlugin) GetPluginInfo(ctx context.Context, req *spi.GetPluginI
 
 func NewIITAttestorPlugin() *IITAttestorPlugin {
 	return &IITAttestorPlugin{
-		BaseIITAttestorPlugin: BaseIITAttestorPlugin{
-			tokenKeyRetriever: newGooglePublicKeyRetriever(googleCertURL),
-		},
+		BaseIITAttestorPlugin: NewBaseIITAttestorPlugin(),
+	}
+}
+
+func NewBaseIITAttestorPlugin() BaseIITAttestorPlugin {
+	return BaseIITAttestorPlugin{
+		tokenKeyRetriever: newGooglePublicKeyRetriever(googleCertURL),
 	}
 }
 
