@@ -100,7 +100,7 @@ func (p *IITAttestorPlugin) FetchAttestationData(stream nodeattestor.FetchAttest
 		return err
 	}
 
-	identityToken, identityTokenBytes, err := RetrieveValidInstanceIdentityToken(identityTokenURL(p.tokenHost, c.ServiceAccount))
+	identityToken, identityTokenBytes, err := RetrieveValidInstanceIdentityToken(IdentityTokenURL(p.tokenHost, c.ServiceAccount))
 	if err != nil {
 		return newErrorf("unable to retrieve valid identity token: %v", err)
 	}
