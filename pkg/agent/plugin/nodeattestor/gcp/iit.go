@@ -38,7 +38,7 @@ type IITAttestorPlugin struct {
 	config *IITAttestorConfig
 }
 
-func identityTokenURL(host, serviceAccount string) string {
+func IdentityTokenURL(host, serviceAccount string) string {
 	query := url.Values{}
 	query.Set("audience", identityTokenAudience)
 	query.Set("format", "full")
