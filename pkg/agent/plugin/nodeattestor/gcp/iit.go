@@ -51,7 +51,7 @@ func identityTokenURL(host, serviceAccount string) string {
 	return url.String()
 }
 
-func RetrieveInstanceIdentityToken(url string) ([]byte, error) {
+func retrieveInstanceIdentityToken(url string) ([]byte, error) {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -76,18 +76,37 @@ func RetrieveInstanceIdentityToken(url string) ([]byte, error) {
 	return bytes, nil
 }
 
+func RetrieveValidInstanceIdentityToken(url string) (*gcp.IdentityToken, []byte, error) {
+	identityTokenBytes, err := retrieveInstanceIdentityToken(url)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	identityToken := &gcp.IdentityToken{}
+	if _, _, err := new(jwt.Parser).ParseUnverified(string(identityTokenBytes), identityToken); err != nil {
+		return nil, nil, newErrorf("unable to parse identity token: %v", err)
+	}
+
+	if identityToken.Google == (gcp.Google{}) {
+		return nil, nil, newError("identity token is missing google claims")
+	}
+
+	return identityToken, identityTokenBytes, nil
+}
+
 func (p *IITAttestorPlugin) FetchAttestationData(stream nodeattestor.FetchAttestationData_PluginStream) error {
 	c, err := p.getConfig()
 	if err != nil {
 		return err
 	}
 
-	docBytes, err := RetrieveInstanceIdentityToken(identityTokenURL(p.tokenHost, c.ServiceAccount))
+	identityToken, identityTokenBytes, err := RetrieveValidInstanceIdentityToken(identityTokenURL(p.tokenHost, c.ServiceAccount))
 	if err != nil {
-		return newErrorf("unable to retrieve identity token: %v", err)
+		return newErrorf("unable to retrieve valid identity token: %v", err)
 	}
 
-	resp, err := p.buildAttestationResponse(c.trustDomain, docBytes)
+	spiffeID := gcp.MakeSpiffeID(p.config.trustDomain, identityToken.Google.ComputeEngine.ProjectID, identityToken.Google.ComputeEngine.InstanceID)
+	resp, err := BuildAttestationResponse(spiffeID, gcp.PluginName, identityTokenBytes)
 	if err != nil {
 		return err
 	}
@@ -99,23 +118,12 @@ func (p *IITAttestorPlugin) FetchAttestationData(stream nodeattestor.FetchAttest
 	return nil
 }
 
-func (p *IITAttestorPlugin) buildAttestationResponse(trustDomain string, identityTokenBytes []byte) (*nodeattestor.FetchAttestationDataResponse, error) {
-	identityToken := &gcp.IdentityToken{}
-	_, _, err := new(jwt.Parser).ParseUnverified(string(identityTokenBytes), identityToken)
-	if err != nil {
-		return nil, newErrorf("unable to parse identity token: %v", err)
-	}
-
-	if identityToken.Google == (gcp.Google{}) {
-		return nil, newError("identity token is missing google claims")
-	}
+func BuildAttestationResponse(spiffeID string, pluginName string, identityTokenBytes []byte) (*nodeattestor.FetchAttestationDataResponse, error) {
 
 	data := &common.AttestationData{
-		Type: gcp.PluginName,
+		Type: pluginName,
 		Data: identityTokenBytes,
 	}
-
-	spiffeID := gcp.MakeSpiffeID(trustDomain, identityToken.Google.ComputeEngine.ProjectID, identityToken.Google.ComputeEngine.InstanceID)
 
 	resp := &nodeattestor.FetchAttestationDataResponse{
 		AttestationData: data,
@@ -164,7 +172,7 @@ func (p *IITAttestorPlugin) getConfig() (*IITAttestorConfig, error) {
 	defer p.mtx.Unlock()
 
 	if p.config == nil {
-		return nil, newError("gcp-iit: not configured")
+		return nil, newError("not configured")
 	}
 	return p.config, nil
 }

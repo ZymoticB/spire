@@ -84,7 +84,7 @@ func (s *Suite) TestUnexpectedStatus() {
 	s.status = http.StatusBadGateway
 	s.body = ""
 	_, err := s.fetchAttestationData()
-	s.requireErrorContains(err, "gcp-iit: unable to retrieve identity token: unexpected status code: 502")
+	s.requireErrorContains(err, "gcp-iit: unable to retrieve valid identity token: unexpected status code: 502")
 }
 
 func (s *Suite) TestErrorOnInvalidToken() {
