@@ -50,8 +50,8 @@ func (p *BaseIITAttestorPlugin) ValidateIdentityAndExtractMetadata(stream nodeat
 		return gcp.ComputeEngine{}, newError("request missing attestation data")
 	}
 
-	if attestationData.Type != gcp.PluginName {
-		return gcp.ComputeEngine{}, newErrorf("unexpected attestation data type %q", attestationData.Type)
+	if attestationData.Type != pluginName {
+		return gcp.ComputeEngine{}, newErrorf("unexpected attestation data type %q", pluginName)
 	}
 
 	if req.AttestedBefore {
