@@ -15,22 +15,22 @@ import (
 
 // streamManager manages connection streams
 type streamManager struct {
-	ctx           context.Context
-	logger        *zap.Logger
-	addr          string
-	streamChan    chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient
-	reconnectChan chan struct{}
-	updateChan    chan *X509SVIDsUpdate
+	ctx            context.Context
+	logger         *zap.Logger
+	addr           string
+	streamChan     chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient
+	reconnectChan  chan struct{}
+	connectionChan chan bool
 }
 
-func newStreamManager(ctx context.Context, logger *zap.Logger, addr string, updateChan chan *X509SVIDsUpdate) *streamManager {
+func newStreamManager(ctx context.Context, logger *zap.Logger, addr string, connectionChan chan bool) *streamManager {
 	return &streamManager{
-		ctx:           ctx,
-		logger:        logger,
-		addr:          addr,
-		streamChan:    make(chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient, 1),
-		reconnectChan: make(chan struct{}, 1),
-		updateChan:    updateChan,
+		ctx:            ctx,
+		logger:         logger,
+		addr:           addr,
+		streamChan:     make(chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient, 1),
+		reconnectChan:  make(chan struct{}, 1),
+		connectionChan: connectionChan,
 	}
 }
 
@@ -52,7 +52,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 		return err
 	}
 	c.streamChan <- stream
-	c.updateChan <- &X509SVIDsUpdate{Type: StreamEstablished}
+	c.connectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
 	go func() {
@@ -60,7 +60,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 			select {
 			case _, ok := <-c.reconnectChan:
 				if ok {
-					c.updateChan <- &X509SVIDsUpdate{Type: StreamError}
+					c.connectionChan <- false
 					closer.Close()
 					stream, closer, err = c.newStream(c.ctx, c.addr)
 					if err != nil {
@@ -68,7 +68,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 						return
 					}
 					c.streamChan <- stream
-					c.updateChan <- &X509SVIDsUpdate{Type: StreamEstablished}
+					c.connectionChan <- true
 					c.logger.Debug("Created updated stream")
 				}
 			case <-c.ctx.Done():

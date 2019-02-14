@@ -36,13 +36,13 @@ func (c *streamReader) start(ctx context.Context) {
 
 			select {
 			case stream, ok = <-c.streamManager.Chan():
+				if !ok {
+					continue
+				}
 			case <-ctx.Done():
 				c.logger.Debug("Shutting down reader")
 				close(c.cchan)
 				return
-			}
-			if !ok {
-				continue
 			}
 			for {
 				resp, err := stream.Recv()

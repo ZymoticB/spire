@@ -3,7 +3,6 @@ package workload
 import (
 	"context"
 	"crypto"
-	"crypto/tls"
 	"crypto/x509"
 	"sync"
 
@@ -31,46 +30,35 @@ func (x *X509SVIDs) Default() *X509SVID {
 //
 // See https://github.com/spiffe/spiffe/blob/master/standards/X509-SVID.md
 type X509SVID struct {
-	SPIFFEID       string
-	PrivateKey     crypto.Signer
-	Certificates   []*x509.Certificate
-	TLSCertificate tls.Certificate
-	TrustBundle    *x509.CertPool
-}
-
-// UpdateType is a type of update that can be sent to a watcher.
-type UpdateType int
-
-const (
-	UpdateSuccess UpdateType = iota + 1
-	UpdateError
-	StreamEstablished
-	StreamError
-)
-
-type X509SVIDsUpdate struct {
-	Type  UpdateType
-	Res   *X509SVIDs
-	Error error
+	SPIFFEID     string
+	PrivateKey   crypto.Signer
+	Certificates []*x509.Certificate
+	TrustBundle  *x509.CertPool
 }
 
 // WorkloadIdentityWatcher is implemented by consumers who wish to be updated on SVID changes.
 type WorkloadIdentityWatcher interface {
 	// UpdateX509SVIDs indicates to the Watcher that the SVID has been updated
-	UpdateX509SVIDs(*X509SVIDsUpdate)
+	UpdateX509SVIDs(*X509SVIDs)
+
+	// OnError indicates an error occurred.
+	OnError(err error)
+
+	// OnConnection indicates a change in the connection state to the SPIFFE agent.
+	OnConnection(connected bool)
 }
 
 // Client interacts with the SPIFFE Workload API.
 type Client struct {
-	logger        *zap.Logger
-	watcher       WorkloadIdentityWatcher
-	addr          string
-	wg            sync.WaitGroup
-	updateChan    chan *X509SVIDsUpdate
-	reader        *streamReader
-	ctx           context.Context
-	cancelFn      func()
-	streamManager *streamManager
+	logger         *zap.Logger
+	watcher        WorkloadIdentityWatcher
+	addr           string
+	wg             sync.WaitGroup
+	connectionChan chan bool
+	reader         *streamReader
+	ctx            context.Context
+	cancelFn       func()
+	streamManager  *streamManager
 }
 
 // Option configures the workload client.
@@ -94,17 +82,17 @@ func Logger(logger *zap.Logger) Option {
 func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Client{
-		logger:     zap.L(),
-		addr:       DefaultAgentAddress,
-		watcher:    watcher,
-		updateChan: make(chan *X509SVIDsUpdate, 1),
-		ctx:        ctx,
-		cancelFn:   cancel,
+		logger:         zap.L(),
+		addr:           DefaultAgentAddress,
+		watcher:        watcher,
+		connectionChan: make(chan bool, 1),
+		ctx:            ctx,
+		cancelFn:       cancel,
 	}
 	for _, opt := range opts {
 		opt(w)
 	}
-	w.streamManager = newStreamManager(ctx, w.logger, w.addr, w.updateChan)
+	w.streamManager = newStreamManager(ctx, w.logger, w.addr, w.connectionChan)
 	w.reader = newStreamReader(ctx, w.logger, w.streamManager)
 	return w, nil
 }
@@ -136,12 +124,12 @@ func (c *Client) run(ctx context.Context) {
 	c.handleUpdates(ctx)
 
 	c.reader.Stop()
-	if c.updateChan != nil {
-		close(c.updateChan)
-		c.logger.Debug("Emptying update chan.", zap.Int("queued", len(c.updateChan)))
-		for range c.updateChan {
+	if c.connectionChan != nil {
+		close(c.connectionChan)
+		c.logger.Debug("Emptying connection chan.", zap.Int("queued", len(c.connectionChan)))
+		for range c.connectionChan {
 		}
-		c.updateChan = nil
+		c.connectionChan = nil
 	}
 }
 
@@ -152,9 +140,9 @@ func (c *Client) handleUpdates(ctx context.Context) {
 			if ok {
 				c.onReceive(resp)
 			}
-		case res, ok := <-c.updateChan:
+		case connected, ok := <-c.connectionChan:
 			if ok {
-				c.watcher.UpdateX509SVIDs(res)
+				c.watcher.OnConnection(connected)
 			}
 		case <-ctx.Done():
 			return
@@ -165,14 +153,8 @@ func (c *Client) handleUpdates(ctx context.Context) {
 func (c *Client) onReceive(resp *workload.X509SVIDResponse) {
 	res, err := protoToX509SVIDs(resp)
 	if err != nil {
-		c.watcher.UpdateX509SVIDs(&X509SVIDsUpdate{
-			Type:  UpdateError,
-			Error: err,
-		})
+		c.watcher.OnError(err)
 		return
 	}
-	c.watcher.UpdateX509SVIDs(&X509SVIDsUpdate{
-		Type: UpdateSuccess,
-		Res:  res,
-	})
+	c.watcher.UpdateX509SVIDs(res)
 }

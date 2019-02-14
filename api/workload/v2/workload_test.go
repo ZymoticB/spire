@@ -47,11 +47,13 @@ func TestClientUpdate(t *testing.T) {
 		handler.WaitForCall()
 		w.WaitForUpdates(2)
 
-		require.Len(t, w.Updates, 2)
-		require.Equal(t, StreamEstablished, w.Updates[0].Type)
-		require.Equal(t, UpdateSuccess, w.Updates[1].Type)
-		require.Equal(t, "spiffe://example.org/foo", w.Updates[1].Res.Default().SPIFFEID)
-		w.Updates = nil
+		require.Len(t, w.Connections, 1)
+		require.Len(t, w.Errors, 0)
+		require.Equal(t, true, w.Connections[0])
+		require.Len(t, w.X509SVIDs, 1)
+		require.Equal(t, "spiffe://example.org/foo", w.X509SVIDs[0].Default().SPIFFEID)
+		w.X509SVIDs = nil
+		w.Connections = nil
 	})
 
 	t.Run("new update", func(t *testing.T) {
@@ -59,22 +61,27 @@ func TestClientUpdate(t *testing.T) {
 		handler.WaitForCall()
 		w.WaitForUpdates(1)
 
-		require.Len(t, w.Updates, 1)
-		require.Equal(t, UpdateSuccess, w.Updates[0].Type)
-		require.Equal(t, "spiffe://example.org/bar", w.Updates[0].Res.Default().SPIFFEID)
-		w.Updates = nil
+		require.Len(t, w.Connections, 0)
+		require.Len(t, w.X509SVIDs, 1)
+		require.Equal(t, "spiffe://example.org/bar", w.X509SVIDs[0].Default().SPIFFEID)
+		require.Len(t, w.Errors, 0)
+		w.X509SVIDs = nil
 	})
 
 	t.Run("stop", func(t *testing.T) {
 		err = c.Stop()
 		require.NoError(t, err)
-		require.Len(t, w.Updates, 0)
+		require.Len(t, w.Connections, 0)
+		require.Len(t, w.X509SVIDs, 0)
+		require.Len(t, w.Errors, 0)
 	})
 }
 
 type testWatcher struct {
 	t            *testing.T
-	Updates      []*X509SVIDsUpdate
+	X509SVIDs    []*X509SVIDs
+	Errors       []error
+	Connections  []bool
 	updateSignal chan struct{}
 	n            int
 	timeout      time.Duration
@@ -88,9 +95,21 @@ func newTestWatcher(t *testing.T) *testWatcher {
 	}
 }
 
-func (w *testWatcher) UpdateX509SVIDs(u *X509SVIDsUpdate) {
+func (w *testWatcher) UpdateX509SVIDs(u *X509SVIDs) {
 	fmt.Printf("%+v\n", u)
-	w.Updates = append(w.Updates, u)
+	w.X509SVIDs = append(w.X509SVIDs, u)
+	w.n++
+	w.updateSignal <- struct{}{}
+}
+
+func (w *testWatcher) OnError(err error) {
+	w.Errors = append(w.Errors, err)
+	w.n++
+	w.updateSignal <- struct{}{}
+}
+
+func (w *testWatcher) OnConnection(connected bool) {
+	w.Connections = append(w.Connections, connected)
 	w.n++
 	w.updateSignal <- struct{}{}
 }
