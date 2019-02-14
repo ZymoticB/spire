@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -12,17 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/proto/api/workload"
 	"github.com/spiffe/spire/test/util"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
 func TestClientStart(t *testing.T) {
 	w := &testWatcher{}
-	c, err := NewClient(w, Addr("notexists"), Logger(zap.NewExample()))
+	c, err := NewClient(w, Addr("notexists"), Logger(logrus.StandardLogger()))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -36,7 +35,7 @@ func TestClientUpdate(t *testing.T) {
 	defer cleanup()
 
 	w := newTestWatcher(t)
-	c, err := NewClient(w, Addr("unix:///"+sockPath), Logger(zap.NewExample()))
+	c, err := NewClient(w, Addr("unix:///"+sockPath), Logger(logrus.StandardLogger()))
 	require.NoError(t, err)
 
 	err = c.Start(context.Background())
@@ -96,7 +95,6 @@ func newTestWatcher(t *testing.T) *testWatcher {
 }
 
 func (w *testWatcher) UpdateX509SVIDs(u *X509SVIDs) {
-	fmt.Printf("%+v\n", u)
 	w.X509SVIDs = append(w.X509SVIDs, u)
 	w.n++
 	w.updateSignal <- struct{}{}

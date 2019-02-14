@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/proto/api/workload"
 	"go.uber.org/multierr"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -19,7 +19,7 @@ type streamManager struct {
 	// Chan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
 	Chan           chan *managedStream
 	ctx            context.Context
-	logger         *zap.Logger
+	logger         *logrus.Logger
 	addr           string
 	reconnectChan  chan struct{}
 	connectionChan chan bool
@@ -39,7 +39,7 @@ func (s *managedStream) Close() error {
 	)
 }
 
-func newStreamManager(ctx context.Context, logger *zap.Logger, addr string, connectionChan chan bool) *streamManager {
+func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, connectionChan chan bool) *streamManager {
 	return &streamManager{
 		Chan:           make(chan *managedStream, 1),
 		ctx:            ctx,
@@ -103,7 +103,7 @@ func (c *streamManager) newStream(ctx context.Context, addr string) (stream work
 			return stream, conn, nil
 		}
 	retry:
-		c.logger.Debug("Error creating stream, retrying.", zap.Error(err))
+		c.logger.WithError(err).Debug("Error creating stream, retrying.")
 		select {
 		case <-ctx.Done():
 			c.logger.Debug("Stream creator shutting down.")

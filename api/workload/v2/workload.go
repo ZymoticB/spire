@@ -6,8 +6,8 @@ import (
 	"crypto/x509"
 	"sync"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/proto/api/workload"
-	"go.uber.org/zap"
 )
 
 const (
@@ -50,7 +50,7 @@ type WorkloadIdentityWatcher interface {
 
 // Client interacts with the SPIFFE Workload API.
 type Client struct {
-	logger         *zap.Logger
+	logger         *logrus.Logger
 	watcher        WorkloadIdentityWatcher
 	addr           string
 	wg             sync.WaitGroup
@@ -72,7 +72,7 @@ func Addr(addr string) Option {
 }
 
 // Logger specifies the logger to use.
-func Logger(logger *zap.Logger) Option {
+func Logger(logger *logrus.Logger) Option {
 	return func(w *Client) {
 		w.logger = logger
 	}
@@ -82,7 +82,7 @@ func Logger(logger *zap.Logger) Option {
 func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Client{
-		logger:         zap.L(),
+		logger:         logrus.StandardLogger(),
 		addr:           DefaultAgentAddress,
 		watcher:        watcher,
 		connectionChan: make(chan bool, 1),
@@ -126,7 +126,7 @@ func (c *Client) run(ctx context.Context) {
 	c.reader.Stop()
 	if c.connectionChan != nil {
 		close(c.connectionChan)
-		c.logger.Debug("Emptying connection chan.", zap.Int("queued", len(c.connectionChan)))
+		c.logger.WithField("queued", len(c.connectionChan)).Debug("Emptying connection chan.")
 		for range c.connectionChan {
 		}
 		c.connectionChan = nil

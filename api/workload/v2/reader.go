@@ -4,13 +4,13 @@ import (
 	"context"
 	"sync"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/proto/api/workload"
-	"go.uber.org/zap"
 )
 
 type streamReader struct {
 	Chan          chan *workload.X509SVIDResponse
-	logger        *zap.Logger
+	logger        *logrus.Logger
 	streamManager *streamManager
 
 	// atomic stream
@@ -18,7 +18,7 @@ type streamReader struct {
 	stream *managedStream
 }
 
-func newStreamReader(ctx context.Context, logger *zap.Logger, streamManager *streamManager) *streamReader {
+func newStreamReader(ctx context.Context, logger *logrus.Logger, streamManager *streamManager) *streamReader {
 	r := &streamReader{
 		logger:        logger,
 		streamManager: streamManager,
@@ -63,7 +63,7 @@ func (c *streamReader) start(ctx context.Context) {
 			for {
 				resp, err := c.getStream().Recv()
 				if err != nil {
-					c.logger.Info("Stream reader failed.", zap.Error(err))
+					c.logger.WithError(err).Info("Stream reader failed.")
 					c.closeStream()
 					c.streamManager.Reconnect()
 					break
@@ -77,7 +77,7 @@ func (c *streamReader) start(ctx context.Context) {
 func (c *streamReader) closeStream() {
 	if stream := c.getStream(); stream != nil {
 		if err := stream.Close(); err != nil {
-			c.logger.Info("Stream close failed.", zap.Error(err))
+			c.logger.WithError(err).Info("Stream close failed.")
 		}
 		c.setStream(nil)
 	}
@@ -86,7 +86,7 @@ func (c *streamReader) closeStream() {
 func (c *streamReader) Stop() {
 	c.closeStream()
 	if c.Chan != nil {
-		c.logger.Debug("Emptying reader chan.", zap.Int("queued", len(c.Chan)))
+		c.logger.WithField("queued", len(c.Chan)).Debug("Emptying reader chan.")
 		for range c.Chan {
 		}
 		c.Chan = nil
