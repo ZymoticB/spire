@@ -15,28 +15,26 @@ import (
 
 // streamManager manages connection streams
 type streamManager struct {
+	// Chan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
+	Chan chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient
+
 	ctx            context.Context
 	logger         *zap.Logger
 	addr           string
-	streamChan     chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient
 	reconnectChan  chan struct{}
 	connectionChan chan bool
 }
 
 func newStreamManager(ctx context.Context, logger *zap.Logger, addr string, connectionChan chan bool) *streamManager {
 	return &streamManager{
+		Chan: make(chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient, 1),
+
 		ctx:            ctx,
 		logger:         logger,
 		addr:           addr,
-		streamChan:     make(chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient, 1),
 		reconnectChan:  make(chan struct{}, 1),
 		connectionChan: connectionChan,
 	}
-}
-
-// Chan returns a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
-func (c *streamManager) Chan() chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient {
-	return c.streamChan
 }
 
 // Reconect informs the stream manager that the current stream is unusable.
@@ -51,7 +49,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 		c.logger.Debug("Shutting down stream manager.")
 		return err
 	}
-	c.streamChan <- stream
+	c.Chan <- stream
 	c.connectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
@@ -67,13 +65,13 @@ func (c *streamManager) Start(ctx context.Context) error {
 						c.logger.Debug("Shutting down stream manager.")
 						return
 					}
-					c.streamChan <- stream
+					c.Chan <- stream
 					c.connectionChan <- true
 					c.logger.Debug("Created updated stream")
 				}
 			case <-c.ctx.Done():
 				closer.Close()
-				close(c.streamChan)
+				close(c.Chan)
 				c.logger.Debug("Shutting down stream manager.")
 				return
 			}

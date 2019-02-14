@@ -136,7 +136,7 @@ func (c *Client) run(ctx context.Context) {
 func (c *Client) handleUpdates(ctx context.Context) {
 	for {
 		select {
-		case resp, ok := <-c.reader.Chan():
+		case resp, ok := <-c.reader.Chan:
 			if ok {
 				c.onReceive(resp)
 			}

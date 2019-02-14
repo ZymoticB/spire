@@ -8,23 +8,19 @@ import (
 )
 
 type streamReader struct {
+	Chan          chan *workload.X509SVIDResponse
 	logger        *zap.Logger
 	streamManager *streamManager
-	cchan         chan *workload.X509SVIDResponse
 }
 
 func newStreamReader(ctx context.Context, logger *zap.Logger, streamManager *streamManager) *streamReader {
 	r := &streamReader{
 		logger:        logger,
 		streamManager: streamManager,
-		cchan:         make(chan *workload.X509SVIDResponse),
+		Chan:          make(chan *workload.X509SVIDResponse),
 	}
 	r.start(ctx)
 	return r
-}
-
-func (c *streamReader) Chan() chan *workload.X509SVIDResponse {
-	return c.cchan
 }
 
 func (c *streamReader) start(ctx context.Context) {
@@ -35,13 +31,13 @@ func (c *streamReader) start(ctx context.Context) {
 			var ok bool
 
 			select {
-			case stream, ok = <-c.streamManager.Chan():
+			case stream, ok = <-c.streamManager.Chan:
 				if !ok {
 					continue
 				}
 			case <-ctx.Done():
 				c.logger.Debug("Shutting down reader")
-				close(c.cchan)
+				close(c.Chan)
 				return
 			}
 			for {
@@ -51,17 +47,17 @@ func (c *streamReader) start(ctx context.Context) {
 					c.streamManager.Reconnect()
 					break
 				}
-				c.cchan <- resp
+				c.Chan <- resp
 			}
 		}
 	}()
 }
 
 func (c *streamReader) Stop() {
-	if c.cchan != nil {
-		c.logger.Debug("Emptying reader chan.", zap.Int("queued", len(c.cchan)))
-		for range c.cchan {
+	if c.Chan != nil {
+		c.logger.Debug("Emptying reader chan.", zap.Int("queued", len(c.Chan)))
+		for range c.Chan {
 		}
-		c.cchan = nil
+		c.Chan = nil
 	}
 }
