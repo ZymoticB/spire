@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spiffe/spire/proto/api/workload"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -16,8 +17,7 @@ import (
 // streamManager manages connection streams
 type streamManager struct {
 	// Chan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
-	Chan chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient
-
+	Chan           chan *managedStream
 	ctx            context.Context
 	logger         *zap.Logger
 	addr           string
@@ -25,10 +25,23 @@ type streamManager struct {
 	connectionChan chan bool
 }
 
+type managedStream struct {
+	workload.SpiffeWorkloadAPI_FetchX509SVIDClient
+
+	closer io.Closer
+}
+
+// Close closes the stream and the underlying connection.
+func (s *managedStream) Close() error {
+	return multierr.Combine(
+		s.SpiffeWorkloadAPI_FetchX509SVIDClient.CloseSend(),
+		s.closer.Close(),
+	)
+}
+
 func newStreamManager(ctx context.Context, logger *zap.Logger, addr string, connectionChan chan bool) *streamManager {
 	return &streamManager{
-		Chan: make(chan workload.SpiffeWorkloadAPI_FetchX509SVIDClient, 1),
-
+		Chan:           make(chan *managedStream, 1),
 		ctx:            ctx,
 		logger:         logger,
 		addr:           addr,
@@ -46,10 +59,10 @@ func (c *streamManager) Reconnect() {
 func (c *streamManager) Start(ctx context.Context) error {
 	stream, closer, err := c.newStream(ctx, c.addr)
 	if err != nil {
-		c.logger.Debug("Shutting down stream manager.")
+		c.logger.Debug("Stream manager failed to start.")
 		return err
 	}
-	c.Chan <- stream
+	c.Chan <- &managedStream{stream, closer}
 	c.connectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
@@ -59,18 +72,16 @@ func (c *streamManager) Start(ctx context.Context) error {
 			case _, ok := <-c.reconnectChan:
 				if ok {
 					c.connectionChan <- false
-					closer.Close()
 					stream, closer, err = c.newStream(c.ctx, c.addr)
 					if err != nil {
 						c.logger.Debug("Shutting down stream manager.")
 						return
 					}
-					c.Chan <- stream
+					c.Chan <- &managedStream{stream, closer}
 					c.connectionChan <- true
 					c.logger.Debug("Created updated stream")
 				}
 			case <-c.ctx.Done():
-				closer.Close()
 				close(c.Chan)
 				c.logger.Debug("Shutting down stream manager.")
 				return
