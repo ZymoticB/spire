@@ -38,6 +38,7 @@ func (c *streamReader) start(ctx context.Context) {
 			case stream, ok = <-c.streamManager.Chan():
 			case <-ctx.Done():
 				c.logger.Debug("Shutting down reader")
+				close(c.cchan)
 				return
 			}
 			if !ok {
@@ -58,7 +59,6 @@ func (c *streamReader) start(ctx context.Context) {
 
 func (c *streamReader) Stop() {
 	if c.cchan != nil {
-		close(c.cchan)
 		c.logger.Debug("Emptying reader chan.", zap.Int("queued", len(c.cchan)))
 		for range c.cchan {
 		}

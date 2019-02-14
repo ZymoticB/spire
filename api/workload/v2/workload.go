@@ -116,6 +116,7 @@ func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error)
 func (c *Client) Start(ctx context.Context) error {
 	c.wg.Add(1)
 	if err := c.streamManager.Start(ctx); err != nil {
+		c.cancelFn()
 		return err
 	}
 	go c.run(c.ctx)

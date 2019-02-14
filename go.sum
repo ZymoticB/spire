@@ -152,10 +152,14 @@ github.com/spiffe/go-spiffe v0.0.0-20170907221946-2bb3101d62b4 h1:/WiK0owj/tTjRC
 github.com/spiffe/go-spiffe v0.0.0-20170907221946-2bb3101d62b4/go.mod h1:q0X9/v75lQ+eeb7Sp2P/FJvmfm9MT7RLmnZS2Gidvns=
 github.com/stretchr/testify v1.2.2 h1:bSDNvY7ZPG5RlJ8otE/7V6gMiyenm9RtJ7IUVIAoJ1w=
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
+github.com/uber-go/goleak v0.10.0 h1:az0llbcxNmFyDtTQ8MPxs8DKEDzmchqXf9C6MdiRXyE=
+github.com/uber-go/goleak v0.10.0/go.mod h1:F2F6qNX3jF/XyeQdgLvWS2Sl13FL+j45BFnn/5v4Qcw=
 github.com/zeebo/errs v1.0.0 h1:uPx2/S2dQn9npw2Y9AKTae12AHkHSqk1WiaRiBNguFA=
 github.com/zeebo/errs v1.0.0/go.mod h1:Yj8dHrUQwls1bF3dr/vcSIu+qf4mI7idnTcHfoACc6I=
 go.uber.org/atomic v1.3.2 h1:2Oa65PReHzfn29GpvgsYwloV9AVFHPDk8tYxt2c2tr4=
 go.uber.org/atomic v1.3.2/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
+go.uber.org/goleak v0.10.0 h1:G3eWbSNIskeRqtsN/1uI5B+eP73y3JUuBsv9AZjehb4=
+go.uber.org/goleak v0.10.0/go.mod h1:VCZuO8V8mFPlL0F5J5GK1rtHV3DrFcQ1R8ryq7FK0aI=
 go.uber.org/multierr v1.1.0 h1:HoEmRHQPVSqub6w2z2d2EOVs2fjyFRGyofhKuyDq0QI=
 go.uber.org/multierr v1.1.0/go.mod h1:wR5kodmAFQ0UK8QlbwjlSNy0Z68gJhDJUG5sjR94q/0=
 go.uber.org/zap v1.9.1 h1:XCJQEf3W6eZaVwhRBof6ImoYGJSITeKWsyeh3HFu/5o=
