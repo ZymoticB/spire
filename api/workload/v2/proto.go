@@ -18,6 +18,7 @@ func protoToX509SVIDs(protoSVIDs *workload.X509SVIDResponse) (*X509SVIDs, error)
 	for _, protoSVID := range protoSVIDs.GetSvids() {
 		svid, err := protoToX509SVID(protoSVID)
 		if err != nil {
+			// TODO(tjulian): Probably support partial success
 			return nil, fmt.Errorf("failed to parse svid for spiffe id %q: %v", protoSVID.GetSpiffeId(), err)
 		}
 		svids.SVIDs = append(svids.SVIDs, svid)
@@ -42,18 +43,18 @@ func protoToX509SVID(svid *workload.X509SVID) (*X509SVID, error) {
 	if !ok {
 		return nil, fmt.Errorf("private key is type %T, not crypto.Signer", privateKey)
 	}
-	trustBundle, err := x509.ParseCertificates(svid.GetBundle())
+	bundleCerts, err := x509.ParseCertificates(svid.GetBundle())
 	if err != nil {
 		return nil, err
 	}
-	roots := x509.NewCertPool()
-	for _, cert := range trustBundle {
-		roots.AddCert(cert)
+	trustBundle := x509.NewCertPool()
+	for _, cert := range bundleCerts {
+		trustBundle.AddCert(cert)
 	}
 	return &X509SVID{
 		SPIFFEID:     svid.GetSpiffeId(),
 		PrivateKey:   signer,
 		Certificates: certificates,
-		TrustBundle:  roots,
+		TrustBundle:  trustBundle,
 	}, nil
 }
