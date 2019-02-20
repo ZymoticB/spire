@@ -10,18 +10,19 @@ import (
 )
 
 func protoToX509SVIDs(protoSVIDs *workload.X509SVIDResponse) (*X509SVIDs, error) {
-	if len(protoSVIDs.Svids) == 0 {
+	if len(protoSVIDs.GetSvids()) == 0 {
 		return nil, errors.New("workload response contains no svids")
 	}
 
 	svids := new(X509SVIDs)
-	for _, protoSVID := range protoSVIDs.Svids {
+	for _, protoSVID := range protoSVIDs.GetSvids() {
 		svid, err := protoToX509SVID(protoSVID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse svid for spiffe id %q: %v", protoSVID.GetSpiffeId(), err)
 		}
 		svids.SVIDs = append(svids.SVIDs, svid)
 	}
+
 	return svids, nil
 }
 

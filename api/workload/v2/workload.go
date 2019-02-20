@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -17,8 +18,18 @@ const (
 
 // X509SVIDs is an X.509 SVID response from the SPIFFE Workload API.
 type X509SVIDs struct {
-	// SVIDs is a list of X.509 SVIDs.
+	// SVIDs is a list of X509SVID messages, each of which includes a single
+	// SPIFFE Verifiable Identity Document, along with its private key and bundle.
 	SVIDs []*X509SVID
+
+	// CRL is a list of revoked certificates.
+	// Unimplemented.
+	CRL *pkix.CertificateList
+
+	// FederatedBundles are CA certificate bundles belonging to foreign Trust Domains
+	// that the workload should trust, keyed by the SPIFFE ID of the foreign domain.
+	// Unimplemented.
+	FederatedBundles map[string]*x509.CertPool
 }
 
 // Default returns the default SVID (the first in the list).
