@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// backoff defines an exponential backoff policy.
+// backoff defines an linear backoff policy.
 type backoff struct {
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
@@ -22,7 +22,7 @@ func newBackoff() *backoff {
 
 // Duration returns the next wait period for the backoff. Not goroutine-safe.
 func (b *backoff) Duration() time.Duration {
-	backoff := math.Pow(2, float64(b.n))
+	backoff := float64(b.n) + 1
 	d := math.Min(b.InitialDelay.Seconds()*backoff, b.MaxDelay.Seconds())
 	b.n++
 	return time.Duration(d) * time.Second
