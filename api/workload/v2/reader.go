@@ -9,12 +9,12 @@ import (
 )
 
 type streamReader struct {
-	Chan          chan *workload.X509SVIDResponse
+	SVIDChan      chan *workload.X509SVIDResponse
 	logger        *logrus.Logger
 	streamManager *streamManager
 
 	// atomic stream
-	mu     *sync.RWMutex
+	mu     sync.RWMutex
 	stream *managedStream
 }
 
@@ -22,8 +22,7 @@ func newStreamReader(ctx context.Context, logger *logrus.Logger, streamManager *
 	r := &streamReader{
 		logger:        logger,
 		streamManager: streamManager,
-		mu:            new(sync.RWMutex),
-		Chan:          make(chan *workload.X509SVIDResponse),
+		SVIDChan:      make(chan *workload.X509SVIDResponse),
 	}
 	r.start(ctx)
 	return r
@@ -46,7 +45,7 @@ func (c *streamReader) start(ctx context.Context) {
 	go func() {
 		defer c.logger.Debug("Shutting down reader")
 		defer c.closeStream()
-		defer close(c.Chan)
+		defer close(c.SVIDChan)
 
 		for {
 
@@ -68,7 +67,7 @@ func (c *streamReader) start(ctx context.Context) {
 					c.streamManager.Reconnect()
 					break
 				}
-				c.Chan <- resp
+				c.SVIDChan <- resp
 			}
 		}
 	}()
@@ -85,10 +84,10 @@ func (c *streamReader) closeStream() {
 
 func (c *streamReader) Stop() {
 	c.closeStream()
-	if c.Chan != nil {
-		c.logger.WithField("queued", len(c.Chan)).Debug("Emptying reader chan.")
-		for range c.Chan {
+	if c.SVIDChan != nil {
+		c.logger.WithField("queued", len(c.SVIDChan)).Debug("Emptying reader chan.")
+		for range c.SVIDChan {
 		}
-		c.Chan = nil
+		c.SVIDChan = nil
 	}
 }
