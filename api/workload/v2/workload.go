@@ -103,7 +103,11 @@ func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error)
 	for _, opt := range opts {
 		opt(w)
 	}
-	w.streamManager = newStreamManager(ctx, w.logger, w.addr, w.connectionChan)
+	streamManager, err := newStreamManager(ctx, w.logger, w.addr, w.connectionChan)
+	if err != nil {
+		return nil, err
+	}
+	w.streamManager = streamManager
 	w.reader = newStreamReader(ctx, w.logger, w.streamManager)
 	return w, nil
 }

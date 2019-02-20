@@ -21,13 +21,8 @@ import (
 
 func TestClientStart(t *testing.T) {
 	w := &testWatcher{}
-	c, err := NewClient(w, Addr("notexists"), Logger(logrus.StandardLogger()))
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err = c.Start(ctx)
-	require.EqualError(t, err, context.Canceled.Error())
+	_, err := NewClient(w, Addr("notexists"), Logger(logrus.StandardLogger()))
+	require.EqualError(t, err, `spiffe/workload: agent address "notexists" is not a unix address`)
 }
 
 func TestClientUpdate(t *testing.T) {

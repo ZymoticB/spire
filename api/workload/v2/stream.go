@@ -14,6 +14,8 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+const _unixPathPrefix = "unix://"
+
 // streamManager manages connection streams
 type streamManager struct {
 	// Chan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
@@ -39,7 +41,10 @@ func (s *managedStream) Close() error {
 	)
 }
 
-func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, connectionChan chan bool) *streamManager {
+func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, connectionChan chan bool) (*streamManager, error) {
+	if !strings.HasPrefix(addr, _unixPathPrefix) {
+		return nil, fmt.Errorf("spiffe/workload: agent address %q is not a unix address", addr)
+	}
 	return &streamManager{
 		Chan:           make(chan *managedStream, 1),
 		ctx:            ctx,
@@ -47,7 +52,7 @@ func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, c
 		addr:           addr,
 		reconnectChan:  make(chan struct{}, 1),
 		connectionChan: connectionChan,
-	}
+	}, nil
 }
 
 // Reconect informs the stream manager that the current stream is unusable.
@@ -114,9 +119,6 @@ func (c *streamManager) newStream(ctx context.Context, addr string) (stream work
 }
 
 func newConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	if !strings.HasPrefix(addr, "unix://") {
-		return nil, fmt.Errorf("spiffe/workload: agent address %q is not a unix address", addr)
-	}
 	conn, err := grpc.DialContext(ctx, addr, grpc.WithInsecure())
 	if err != nil {
 		return nil, fmt.Errorf("spiffe/workload: failed to dial workload API at %q: %v", addr, err)
