@@ -61,6 +61,9 @@ func (c *streamManager) Reconnect() {
 }
 
 // Start starts the stream manager.
+//
+// This blocks until a stream is established and will return an error if a stream
+// can't be established within the context's deadline.
 func (c *streamManager) Start(ctx context.Context) error {
 	stream, closer, err := c.newStream(ctx, c.addr)
 	if err != nil {
