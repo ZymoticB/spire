@@ -18,8 +18,8 @@ const _unixPathPrefix = "unix://"
 
 // streamManager manages connection streams
 type streamManager struct {
-	// Chan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
-	Chan           chan *managedStream
+	// StreamChan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
+	StreamChan     chan *managedStream
 	ctx            context.Context
 	logger         *logrus.Logger
 	addr           string
@@ -46,7 +46,7 @@ func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, c
 		return nil, fmt.Errorf("spiffe/workload: agent address %q is not a unix address", addr)
 	}
 	return &streamManager{
-		Chan:           make(chan *managedStream, 1),
+		StreamChan:     make(chan *managedStream, 1),
 		ctx:            ctx,
 		logger:         logger,
 		addr:           addr,
@@ -70,7 +70,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 		c.logger.Debug("Stream manager failed to start.")
 		return err
 	}
-	c.Chan <- &managedStream{stream, closer}
+	c.StreamChan <- &managedStream{stream, closer}
 	c.connectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
@@ -85,12 +85,12 @@ func (c *streamManager) Start(ctx context.Context) error {
 						c.logger.Debug("Shutting down stream manager.")
 						return
 					}
-					c.Chan <- &managedStream{stream, closer}
+					c.StreamChan <- &managedStream{stream, closer}
 					c.connectionChan <- true
 					c.logger.Debug("Created updated stream")
 				}
 			case <-c.ctx.Done():
-				close(c.Chan)
+				close(c.StreamChan)
 				c.logger.Debug("Shutting down stream manager.")
 				return
 			}

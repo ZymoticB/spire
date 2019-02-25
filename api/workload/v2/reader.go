@@ -50,7 +50,7 @@ func (c *streamReader) start(ctx context.Context) {
 		for {
 
 			select {
-			case stream, ok := <-c.streamManager.Chan:
+			case stream, ok := <-c.streamManager.StreamChan:
 				if !ok {
 					return
 				}
