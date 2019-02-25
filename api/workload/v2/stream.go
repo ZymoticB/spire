@@ -19,12 +19,13 @@ const _unixPathPrefix = "unix://"
 // streamManager manages connection streams
 type streamManager struct {
 	// StreamChan is a channel of streams for fetching X509 SVIDs. It is updated whenever a new stream is created.
-	StreamChan     chan *managedStream
+	StreamChan chan *managedStream
+	// ConnectionChan is a stream of connection events.
+	ConnectionChan chan bool
 	ctx            context.Context
 	logger         *logrus.Logger
 	addr           string
 	reconnectChan  chan struct{}
-	connectionChan chan bool
 }
 
 type managedStream struct {
@@ -59,7 +60,7 @@ func (s *managedStream) Close() error {
 	return errors.New(strings.Join(errs, "; "))
 }
 
-func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, connectionChan chan bool) (*streamManager, error) {
+func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string) (*streamManager, error) {
 	if !strings.HasPrefix(addr, _unixPathPrefix) {
 		return nil, fmt.Errorf("spiffe/workload: agent address %q is not a unix address", addr)
 	}
@@ -69,13 +70,28 @@ func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, c
 		logger:         logger,
 		addr:           addr,
 		reconnectChan:  make(chan struct{}, 1),
-		connectionChan: connectionChan,
+		ConnectionChan: make(chan bool, 1),
 	}, nil
 }
 
 // Reconect informs the stream manager that the current stream is unusable.
 func (c *streamManager) Reconnect() {
 	c.reconnectChan <- struct{}{}
+}
+
+// Stop stops the stream manager
+func (c *streamManager) Stop() {
+	c.logger.Debug("Shutting down stream manager.")
+	if c.StreamChan != nil {
+		close(c.StreamChan)
+	}
+	if c.ConnectionChan != nil {
+		close(c.ConnectionChan)
+		c.logger.WithField("queued", len(c.ConnectionChan)).Debug("Emptying connection chan.")
+		for range c.ConnectionChan {
+		}
+		c.ConnectionChan = nil
+	}
 }
 
 // Start starts the stream manager.
@@ -89,7 +105,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 		return err
 	}
 	c.StreamChan <- &managedStream{stream, closer}
-	c.connectionChan <- true
+	c.ConnectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
 	go func() {
@@ -97,19 +113,16 @@ func (c *streamManager) Start(ctx context.Context) error {
 			select {
 			case _, ok := <-c.reconnectChan:
 				if ok {
-					c.connectionChan <- false
+					c.ConnectionChan <- false
 					stream, closer, err = c.newStream(c.ctx, c.addr)
 					if err != nil {
-						c.logger.Debug("Shutting down stream manager.")
 						return
 					}
 					c.StreamChan <- &managedStream{stream, closer}
-					c.connectionChan <- true
+					c.ConnectionChan <- true
 					c.logger.Debug("Created updated stream")
 				}
 			case <-c.ctx.Done():
-				close(c.StreamChan)
-				c.logger.Debug("Shutting down stream manager.")
 				return
 			}
 		}

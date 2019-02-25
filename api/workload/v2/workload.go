@@ -61,15 +61,14 @@ type WorkloadIdentityWatcher interface {
 
 // Client interacts with the SPIFFE Workload API.
 type Client struct {
-	logger         *logrus.Logger
-	watcher        WorkloadIdentityWatcher
-	addr           string
-	wg             sync.WaitGroup
-	connectionChan chan bool
-	reader         *streamReader
-	ctx            context.Context
-	cancelFn       func()
-	streamManager  *streamManager
+	logger        *logrus.Logger
+	watcher       WorkloadIdentityWatcher
+	addr          string
+	wg            sync.WaitGroup
+	reader        *streamReader
+	ctx           context.Context
+	cancelFn      func()
+	streamManager *streamManager
 }
 
 // Option configures the workload client.
@@ -93,17 +92,16 @@ func Logger(logger *logrus.Logger) Option {
 func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Client{
-		logger:         logrus.StandardLogger(),
-		addr:           DefaultAgentAddress,
-		watcher:        watcher,
-		connectionChan: make(chan bool, 1),
-		ctx:            ctx,
-		cancelFn:       cancel,
+		logger:   logrus.StandardLogger(),
+		addr:     DefaultAgentAddress,
+		watcher:  watcher,
+		ctx:      ctx,
+		cancelFn: cancel,
 	}
 	for _, opt := range opts {
 		opt(w)
 	}
-	streamManager, err := newStreamManager(ctx, w.logger, w.addr, w.connectionChan)
+	streamManager, err := newStreamManager(ctx, w.logger, w.addr)
 	if err != nil {
 		return nil, err
 	}
@@ -139,13 +137,6 @@ func (c *Client) run(ctx context.Context) {
 	c.handleUpdates(ctx)
 
 	c.reader.Stop()
-	if c.connectionChan != nil {
-		close(c.connectionChan)
-		c.logger.WithField("queued", len(c.connectionChan)).Debug("Emptying connection chan.")
-		for range c.connectionChan {
-		}
-		c.connectionChan = nil
-	}
 }
 
 func (c *Client) handleUpdates(ctx context.Context) {
@@ -155,7 +146,7 @@ func (c *Client) handleUpdates(ctx context.Context) {
 			if ok {
 				c.onReceive(resp)
 			}
-		case connected, ok := <-c.connectionChan:
+		case connected, ok := <-c.streamManager.ConnectionChan:
 			if ok {
 				c.watcher.OnConnection(connected)
 			}
