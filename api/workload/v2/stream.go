@@ -26,6 +26,7 @@ type streamManager struct {
 	logger         *logrus.Logger
 	addr           string
 	reconnectChan  chan struct{}
+	forceStart     bool
 }
 
 type managedStream struct {
@@ -60,7 +61,7 @@ func (s *managedStream) Close() error {
 	return errors.New(strings.Join(errs, "; "))
 }
 
-func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string) (*streamManager, error) {
+func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, forceStart bool) (*streamManager, error) {
 	if !strings.HasPrefix(addr, _unixPathPrefix) {
 		return nil, fmt.Errorf("spiffe/workload: agent address %q is not a unix address", addr)
 	}
@@ -71,6 +72,7 @@ func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string) (
 		addr:           addr,
 		reconnectChan:  make(chan struct{}, 1),
 		ConnectionChan: make(chan bool, 1),
+		forceStart:     forceStart,
 	}, nil
 }
 
@@ -101,6 +103,11 @@ func (c *streamManager) Stop() {
 func (c *streamManager) Start(ctx context.Context) error {
 	stream, closer, err := c.newStream(ctx, c.addr)
 	if err != nil {
+		if c.forceStart {
+			c.logger.Debug("Stream manager failed to start - booting anyway.")
+			go c.start()
+			return nil
+		}
 		c.logger.Debug("Stream manager failed to start.")
 		return err
 	}
@@ -108,26 +115,28 @@ func (c *streamManager) Start(ctx context.Context) error {
 	c.ConnectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
-	go func() {
-		for {
-			select {
-			case _, ok := <-c.reconnectChan:
-				if ok {
-					c.ConnectionChan <- false
-					stream, closer, err = c.newStream(c.ctx, c.addr)
-					if err != nil {
-						return
-					}
-					c.StreamChan <- &managedStream{stream, closer}
-					c.ConnectionChan <- true
-					c.logger.Debug("Created updated stream")
-				}
-			case <-c.ctx.Done():
-				return
-			}
-		}
-	}()
+	go c.start()
 	return nil
+}
+
+func (c *streamManager) start() {
+	for {
+		select {
+		case _, ok := <-c.reconnectChan:
+			if ok {
+				c.ConnectionChan <- false
+				stream, closer, err := c.newStream(c.ctx, c.addr)
+				if err != nil {
+					return
+				}
+				c.StreamChan <- &managedStream{stream, closer}
+				c.ConnectionChan <- true
+				c.logger.Debug("Created updated stream")
+			}
+		case <-c.ctx.Done():
+			return
+		}
+	}
 }
 
 func (c *streamManager) newStream(ctx context.Context, addr string) (stream workload.SpiffeWorkloadAPI_FetchX509SVIDClient, closer io.Closer, err error) {

@@ -69,6 +69,7 @@ type Client struct {
 	ctx           context.Context
 	cancelFn      func()
 	streamManager *streamManager
+	forceStart    bool
 }
 
 // Option configures the workload client.
@@ -88,6 +89,14 @@ func Logger(logger *logrus.Logger) Option {
 	}
 }
 
+// ForceStart means that the client will boot even if it can't connect to the
+// SPIFFE Workload API. It will continue to attempt to connect in the background.
+func ForceStart() Option {
+	return func(w *Client) {
+		w.forceStart = true
+	}
+}
+
 // NewClient returns a new Workload API client.
 func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,7 +110,7 @@ func NewClient(watcher WorkloadIdentityWatcher, opts ...Option) (*Client, error)
 	for _, opt := range opts {
 		opt(w)
 	}
-	streamManager, err := newStreamManager(ctx, w.logger, w.addr)
+	streamManager, err := newStreamManager(ctx, w.logger, w.addr, w.forceStart)
 	if err != nil {
 		return nil, err
 	}
