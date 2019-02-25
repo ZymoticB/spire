@@ -2,7 +2,6 @@ package workload
 
 import (
 	"context"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/proto/api/workload"
@@ -12,35 +11,27 @@ type streamReader struct {
 	SVIDChan      chan *workload.X509SVIDResponse
 	logger        *logrus.Logger
 	streamManager *streamManager
+	ctx           context.Context
+	cancelFn      func()
 
 	// atomic stream
-	mu     sync.RWMutex
 	stream *managedStream
 }
 
 func newStreamReader(ctx context.Context, logger *logrus.Logger, streamManager *streamManager) *streamReader {
+	ctx, cancel := context.WithCancel(ctx)
 	r := &streamReader{
+		ctx:           ctx,
+		cancelFn:      cancel,
 		logger:        logger,
 		streamManager: streamManager,
 		SVIDChan:      make(chan *workload.X509SVIDResponse),
 	}
-	r.start(ctx)
+	r.start()
 	return r
 }
 
-func (c *streamReader) getStream() *managedStream {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.stream
-}
-
-func (c *streamReader) setStream(stream *managedStream) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stream = stream
-}
-
-func (c *streamReader) start(ctx context.Context) {
+func (c *streamReader) start() {
 	c.logger.Debug("Starting reader.")
 	go func() {
 		defer c.logger.Debug("Shutting down reader")
@@ -48,19 +39,18 @@ func (c *streamReader) start(ctx context.Context) {
 		defer close(c.SVIDChan)
 
 		for {
-
 			select {
 			case stream, ok := <-c.streamManager.StreamChan:
 				if !ok {
 					return
 				}
-				c.setStream(stream)
-			case <-ctx.Done():
+				c.stream = stream
+			case <-c.ctx.Done():
 				return
 			}
 
 			for {
-				resp, err := c.getStream().Recv()
+				resp, err := c.stream.Recv(c.ctx)
 				if err != nil {
 					c.logger.WithError(err).Info("Stream reader failed.")
 					c.closeStream()
@@ -74,16 +64,16 @@ func (c *streamReader) start(ctx context.Context) {
 }
 
 func (c *streamReader) closeStream() {
-	if stream := c.getStream(); stream != nil {
-		if err := stream.Close(); err != nil {
+	if c.stream != nil {
+		if err := c.stream.Close(); err != nil {
 			c.logger.WithError(err).Info("Stream close failed.")
 		}
-		c.setStream(nil)
+		c.stream = nil
 	}
 }
 
 func (c *streamReader) Stop() {
-	c.closeStream()
+	c.cancelFn()
 	if c.SVIDChan != nil {
 		c.logger.WithField("queued", len(c.SVIDChan)).Debug("Emptying reader chan.")
 		for range c.SVIDChan {

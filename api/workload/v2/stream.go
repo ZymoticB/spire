@@ -28,15 +28,29 @@ type streamManager struct {
 }
 
 type managedStream struct {
-	workload.SpiffeWorkloadAPI_FetchX509SVIDClient
-
+	client workload.SpiffeWorkloadAPI_FetchX509SVIDClient
 	closer io.Closer
+}
+
+// Recv blocks for an SVID response and is context-aware.
+func (s *managedStream) Recv(ctx context.Context) (res *workload.X509SVIDResponse, err error) {
+	done := make(chan struct{})
+	go func() {
+		res, err = s.client.Recv()
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-done:
+		return res, err
+	}
 }
 
 // Close closes the stream and the underlying connection.
 func (s *managedStream) Close() error {
 	var errs []string
-	if err := s.SpiffeWorkloadAPI_FetchX509SVIDClient.CloseSend(); err != nil {
+	if err := s.client.CloseSend(); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if err := s.closer.Close(); err != nil {
