@@ -33,6 +33,9 @@ type X509SVIDs struct {
 }
 
 // Default returns the default SVID (the first in the list).
+//
+// See the SPIFFE Workload API standard Section 5.3
+// (https://github.com/spiffe/spiffe/blob/master/standards/SPIFFE_Workload_API.md#53-default-identity)
 func (x *X509SVIDs) Default() *X509SVID {
 	return x.SVIDs[0]
 }
