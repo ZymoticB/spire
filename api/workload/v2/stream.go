@@ -2,6 +2,7 @@ package workload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/proto/api/workload"
-	"go.uber.org/multierr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -35,10 +35,14 @@ type managedStream struct {
 
 // Close closes the stream and the underlying connection.
 func (s *managedStream) Close() error {
-	return multierr.Combine(
-		s.SpiffeWorkloadAPI_FetchX509SVIDClient.CloseSend(),
-		s.closer.Close(),
-	)
+	var errs []string
+	if err := s.SpiffeWorkloadAPI_FetchX509SVIDClient.CloseSend(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := s.closer.Close(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	return errors.New(strings.Join(errs, "; "))
 }
 
 func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, connectionChan chan bool) (*streamManager, error) {
