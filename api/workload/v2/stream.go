@@ -58,7 +58,10 @@ func (s *managedStream) Close() error {
 	if err := s.closer.Close(); err != nil {
 		errs = append(errs, err.Error())
 	}
-	return errors.New(strings.Join(errs, "; "))
+	if errs != nil {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string, forceStart bool) (*streamManager, error) {
@@ -101,7 +104,7 @@ func (c *streamManager) Stop() {
 // This blocks until a stream is established and will return an error if a stream
 // can't be established within the context's deadline.
 func (c *streamManager) Start(ctx context.Context) error {
-	stream, closer, err := c.newStream(ctx, c.addr)
+	stream, err := c.newStream(ctx, c.ctx, c.addr)
 	if err != nil {
 		if c.forceStart {
 			c.logger.Debug("Stream manager failed to start - booting anyway.")
@@ -111,7 +114,7 @@ func (c *streamManager) Start(ctx context.Context) error {
 		c.logger.Debug("Stream manager failed to start.")
 		return err
 	}
-	c.StreamChan <- &managedStream{stream, closer}
+	c.StreamChan <- stream
 	c.ConnectionChan <- true
 	c.logger.Debug("Started stream manager.")
 
@@ -125,11 +128,11 @@ func (c *streamManager) start() {
 		case _, ok := <-c.reconnectChan:
 			if ok {
 				c.ConnectionChan <- false
-				stream, closer, err := c.newStream(c.ctx, c.addr)
+				stream, err := c.newStream(c.ctx, c.ctx, c.addr)
 				if err != nil {
-					return
+					continue
 				}
-				c.StreamChan <- &managedStream{stream, closer}
+				c.StreamChan <- stream
 				c.ConnectionChan <- true
 				c.logger.Debug("Created updated stream")
 			}
@@ -139,23 +142,31 @@ func (c *streamManager) start() {
 	}
 }
 
-func (c *streamManager) newStream(ctx context.Context, addr string) (stream workload.SpiffeWorkloadAPI_FetchX509SVIDClient, closer io.Closer, err error) {
+func (c *streamManager) newStream(dialCtx, streamCtx context.Context, addr string) (*managedStream, error) {
 	backoff := newBackoff()
 	for {
-		conn, err := newConn(ctx, addr)
+		var stream workload.SpiffeWorkloadAPI_FetchX509SVIDClient
+		var err error
+		conn, err := newConn(dialCtx, addr)
 		if err != nil {
 			goto retry
 		}
-		stream, err = newX509SVIDStream(ctx, conn)
+		stream, err = newX509SVIDStream(streamCtx, conn)
 		if err == nil {
-			return stream, conn, nil
+			return &managedStream{
+				client: stream,
+				closer: conn,
+			}, nil
 		}
 	retry:
 		c.logger.WithError(err).Debug("Error creating stream, retrying.")
 		select {
-		case <-ctx.Done():
+		case <-dialCtx.Done():
 			c.logger.Debug("Stream creator shutting down.")
-			return nil, nil, ctx.Err()
+			return nil, dialCtx.Err()
+		case <-streamCtx.Done():
+			c.logger.Debug("Stream creator shutting down.")
+			return nil, streamCtx.Err()
 		case <-time.After(backoff.Duration()):
 		}
 	}
