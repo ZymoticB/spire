@@ -137,10 +137,19 @@ func (c *Client) Start(ctx context.Context) error {
 }
 
 // Stop stops the client.
-func (c *Client) Stop() error {
+func (c *Client) Stop(ctx context.Context) error {
 	c.cancelFn()
-	c.wg.Wait()
-	return nil
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *Client) run(ctx context.Context) {

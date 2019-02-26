@@ -63,7 +63,7 @@ func TestClientUpdate(t *testing.T) {
 	})
 
 	t.Run("stop", func(t *testing.T) {
-		err = c.Stop()
+		err = c.Stop(context.Background())
 		require.NoError(t, err)
 		require.Len(t, w.Connections, 0)
 		require.Len(t, w.X509SVIDs, 0)

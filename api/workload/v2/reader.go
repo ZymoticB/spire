@@ -13,9 +13,6 @@ type streamReader struct {
 	streamManager *streamManager
 	ctx           context.Context
 	cancelFn      func()
-
-	// atomic stream
-	stream *managedStream
 }
 
 func newStreamReader(ctx context.Context, logger *logrus.Logger, streamManager *streamManager) *streamReader {
@@ -35,7 +32,6 @@ func (c *streamReader) start() {
 	c.logger.Debug("Starting reader.")
 	go func() {
 		defer c.logger.Debug("Shutting down reader")
-		defer c.closeStream()
 		defer close(c.SVIDChan)
 
 		for {
@@ -44,31 +40,28 @@ func (c *streamReader) start() {
 				if !ok {
 					return
 				}
-				c.stream = stream
+				c.recv(stream)
 			case <-c.ctx.Done():
 				return
-			}
-
-			for {
-				resp, err := c.stream.Recv(c.ctx)
-				if err != nil {
-					c.logger.WithError(err).Info("Stream reader failed.")
-					c.closeStream()
-					c.streamManager.Reconnect()
-					break
-				}
-				c.SVIDChan <- resp
 			}
 		}
 	}()
 }
 
-func (c *streamReader) closeStream() {
-	if c.stream != nil {
-		if err := c.stream.Close(); err != nil {
+func (c *streamReader) recv(stream *managedStream) {
+	defer func() {
+		if err := stream.Close(); err != nil {
 			c.logger.WithError(err).Info("Stream close failed.")
 		}
-		c.stream = nil
+	}()
+	for {
+		resp, err := stream.Recv(c.ctx)
+		if err != nil {
+			c.logger.WithError(err).Info("Stream reader failed.")
+			c.streamManager.Reconnect()
+			return
+		}
+		c.SVIDChan <- resp
 	}
 }
 
