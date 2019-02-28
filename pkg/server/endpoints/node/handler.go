@@ -524,7 +524,7 @@ func (h *Handler) validateAttestation(
 	}
 	//check if baseSPIFFEID in attest response matches with SPIFFEID in CSR
 	if attestResponse.BaseSPIFFEID != csrBaseSpiffeID {
-		return errors.New("attested SPIFFE ID does not match CSR")
+		return fmt.Errorf("attested SPIFFE ID does not match CSR, server: %q, csr: %q", attestResponse.BaseSPIFFEID, csrBaseSpiffeID)
 	}
 
 	return nil
