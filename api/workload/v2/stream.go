@@ -79,8 +79,8 @@ func newStreamManager(ctx context.Context, logger *logrus.Logger, addr string) (
 
 // Reconect informs the stream manager that the current stream is unusable.
 func (c *streamManager) Reconnect() {
-	c.reconnectChan <- struct{}{}
 	c.ConnectionChan <- false
+	c.reconnectChan <- struct{}{}
 }
 
 // Stop stops the stream manager
