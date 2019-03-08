@@ -109,7 +109,7 @@ func (c *streamManager) start() {
 		select {
 		case _, ok := <-c.reconnectChan:
 			if ok {
-				stream, err := c.newStream(c.ctx, c.ctx, c.addr)
+				stream, err := c.newStream(c.ctx, c.addr)
 				if err != nil {
 					continue
 				}
@@ -123,16 +123,16 @@ func (c *streamManager) start() {
 	}
 }
 
-func (c *streamManager) newStream(dialCtx, streamCtx context.Context, addr string) (*managedStream, error) {
+func (c *streamManager) newStream(ctx context.Context, addr string) (*managedStream, error) {
 	backoff := newBackoff()
 	for {
 		var stream workload.SpiffeWorkloadAPI_FetchX509SVIDClient
 		var err error
-		conn, err := newConn(dialCtx, addr)
+		conn, err := newConn(ctx, addr)
 		if err != nil {
 			goto retry
 		}
-		stream, err = newX509SVIDStream(streamCtx, conn)
+		stream, err = newX509SVIDStream(ctx, conn)
 		if err == nil {
 			return &managedStream{
 				client: stream,
@@ -142,12 +142,9 @@ func (c *streamManager) newStream(dialCtx, streamCtx context.Context, addr strin
 	retry:
 		c.logger.WithError(err).Debug("Error creating stream, retrying.")
 		select {
-		case <-dialCtx.Done():
+		case <-ctx.Done():
 			c.logger.Debug("Stream creator shutting down.")
-			return nil, dialCtx.Err()
-		case <-streamCtx.Done():
-			c.logger.Debug("Stream creator shutting down.")
-			return nil, streamCtx.Err()
+			return nil, ctx.Err()
 		case <-time.After(backoff.Duration()):
 		}
 	}
