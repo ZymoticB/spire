@@ -37,7 +37,7 @@ type PluginSuite struct {
 	cacert *x509.Certificate
 	dir    string
 
-	nextId int
+	nextID int
 	ds     datastore.Plugin
 }
 
@@ -64,8 +64,8 @@ func (s *PluginSuite) TearDownSuite() {
 func (s *PluginSuite) newPlugin() datastore.Plugin {
 	p := newPlugin()
 
-	s.nextId++
-	dbPath := filepath.Join(s.dir, fmt.Sprintf("db%d.sqlite3", s.nextId))
+	s.nextID++
+	dbPath := filepath.Join(s.dir, fmt.Sprintf("db%d.sqlite3", s.nextID))
 
 	_, err := p.Configure(context.Background(), &spi.ConfigureRequest{
 		Configuration: fmt.Sprintf(`
@@ -527,7 +527,7 @@ func (s *PluginSuite) TestNodeSelectors() {
 
 func (s *PluginSuite) TestCreateRegistrationEntry() {
 	var validRegistrationEntries []*common.RegistrationEntry
-	s.getTestDataFromJsonFile(filepath.Join("testdata", "valid_registration_entries.json"), &validRegistrationEntries)
+	s.getTestDataFromJSONFile(filepath.Join("testdata", "valid_registration_entries.json"), &validRegistrationEntries)
 
 	for _, validRegistrationEntry := range validRegistrationEntries {
 		resp, err := s.ds.CreateRegistrationEntry(ctx, &datastore.CreateRegistrationEntryRequest{Entry: validRegistrationEntry})
@@ -542,7 +542,7 @@ func (s *PluginSuite) TestCreateRegistrationEntry() {
 
 func (s *PluginSuite) TestCreateInvalidRegistrationEntry() {
 	var invalidRegistrationEntries []*common.RegistrationEntry
-	s.getTestDataFromJsonFile(filepath.Join("testdata", "invalid_registration_entries.json"), &invalidRegistrationEntries)
+	s.getTestDataFromJSONFile(filepath.Join("testdata", "invalid_registration_entries.json"), &invalidRegistrationEntries)
 
 	for _, invalidRegistrationEntry := range invalidRegistrationEntries {
 		createRegistrationEntryResponse, err := s.ds.CreateRegistrationEntry(ctx, &datastore.CreateRegistrationEntryRequest{Entry: invalidRegistrationEntry})
@@ -574,6 +574,54 @@ func (s *PluginSuite) TestFetchRegistrationEntry() {
 	s.Require().NoError(err)
 	s.Require().NotNil(fetchRegistrationEntryResponse)
 	s.Equal(createdEntry, fetchRegistrationEntryResponse.Entry)
+}
+
+func (s *PluginSuite) TestPruneRegistrationEntries() {
+	now := time.Now().Unix()
+	registeredEntry := &datastore.RegistrationEntry{
+		Selectors: []*common.Selector{
+			{Type: "Type1", Value: "Value1"},
+			{Type: "Type2", Value: "Value2"},
+			{Type: "Type3", Value: "Value3"},
+		},
+		SpiffeId: "SpiffeId",
+		ParentId: "ParentId",
+		Ttl:      1,
+		Expiry:   now,
+	}
+	createRegistrationEntryResponse, err := s.ds.CreateRegistrationEntry(ctx, &datastore.CreateRegistrationEntryRequest{Entry: registeredEntry})
+	s.Require().NoError(err)
+	s.Require().NotNil(createRegistrationEntryResponse)
+	createdEntry := createRegistrationEntryResponse.Entry
+
+	// Ensure we don't prune valid entries, wind clock back 10s
+	_, err = s.ds.PruneRegistrationEntries(ctx, &datastore.PruneRegistrationEntriesRequest{
+		ExpiresBefore: now - 10,
+	})
+	s.Require().NoError(err)
+	fetchRegistrationEntryResponse, err := s.ds.FetchRegistrationEntry(ctx, &datastore.FetchRegistrationEntryRequest{EntryId: createdEntry.EntryId})
+	s.Require().NoError(err)
+	s.Require().NotNil(fetchRegistrationEntryResponse)
+	s.Equal(createdEntry, fetchRegistrationEntryResponse.Entry)
+
+	// Ensure we don't prune on the exact ExpiresBefore
+	_, err = s.ds.PruneRegistrationEntries(ctx, &datastore.PruneRegistrationEntriesRequest{
+		ExpiresBefore: now,
+	})
+	s.Require().NoError(err)
+	fetchRegistrationEntryResponse, err = s.ds.FetchRegistrationEntry(ctx, &datastore.FetchRegistrationEntryRequest{EntryId: createdEntry.EntryId})
+	s.Require().NoError(err)
+	s.Require().NotNil(fetchRegistrationEntryResponse)
+	s.Equal(createdEntry, fetchRegistrationEntryResponse.Entry)
+
+	// Ensure we prune old entries
+	_, err = s.ds.PruneRegistrationEntries(ctx, &datastore.PruneRegistrationEntriesRequest{
+		ExpiresBefore: now + 10,
+	})
+	s.Require().NoError(err)
+	fetchRegistrationEntryResponse, err = s.ds.FetchRegistrationEntry(ctx, &datastore.FetchRegistrationEntryRequest{EntryId: createdEntry.EntryId})
+	s.Require().NoError(err)
+	s.Nil(fetchRegistrationEntryResponse.Entry)
 }
 
 func (s *PluginSuite) TestFetchInexistentRegistrationEntry() {
@@ -1196,6 +1244,17 @@ func (s *PluginSuite) TestPruneJoinTokens() {
 	s.Require().NoError(err)
 	s.Equal("foobar", resp.JoinToken.Token)
 
+	// Ensure we don't prune on the exact ExpiresBefore
+	_, err = s.ds.PruneJoinTokens(ctx, &datastore.PruneJoinTokensRequest{
+		ExpiresBefore: now,
+	})
+	s.Require().NoError(err)
+	resp, err = s.ds.FetchJoinToken(ctx, &datastore.FetchJoinTokenRequest{
+		Token: joinToken.Token,
+	})
+	s.Require().NoError(err)
+	s.Equal("foobar", resp.JoinToken.Token)
+
 	// Ensure we prune old tokens
 	joinToken.Expiry = (now + 10)
 	_, err = s.ds.PruneJoinTokens(ctx, &datastore.PruneJoinTokensRequest{
@@ -1324,6 +1383,23 @@ func (s *PluginSuite) TestMigration() {
 			s.Require().NoError(err)
 			s.Require().Len(resp.Entries, 1)
 			s.Require().True(resp.Entries[0].Downstream)
+		case 6:
+			resp, err := s.ds.ListRegistrationEntries(context.Background(), &datastore.ListRegistrationEntriesRequest{})
+			s.Require().NoError(err)
+			s.Require().Len(resp.Entries, 1)
+			s.Require().Zero(resp.Entries[0].Expiry)
+
+			expiryVal := time.Now().Unix()
+			resp.Entries[0].Expiry = expiryVal
+			_, err = s.ds.UpdateRegistrationEntry(context.Background(), &datastore.UpdateRegistrationEntryRequest{
+				Entry: resp.Entries[0],
+			})
+			s.Require().NoError(err)
+
+			resp, err = s.ds.ListRegistrationEntries(context.Background(), &datastore.ListRegistrationEntriesRequest{})
+			s.Require().NoError(err)
+			s.Require().Len(resp.Entries, 1)
+			s.Require().Equal(expiryVal, resp.Entries[0].Expiry)
 		default:
 			s.T().Fatalf("no migration test added for version %d", i)
 		}
@@ -1357,11 +1433,11 @@ func (s *PluginSuite) TestBindVar() {
 	s.Require().Equal("SELECT whatever FROM foo WHERE x = $1 AND y = $2", bound)
 }
 
-func (s *PluginSuite) getTestDataFromJsonFile(filePath string, jsonValue interface{}) {
-	invalidRegistrationEntriesJson, err := ioutil.ReadFile(filePath)
+func (s *PluginSuite) getTestDataFromJSONFile(filePath string, jsonValue interface{}) {
+	invalidRegistrationEntriesJSON, err := ioutil.ReadFile(filePath)
 	s.Require().NoError(err)
 
-	err = json.Unmarshal(invalidRegistrationEntriesJson, &jsonValue)
+	err = json.Unmarshal(invalidRegistrationEntriesJSON, &jsonValue)
 	s.Require().NoError(err)
 }
 

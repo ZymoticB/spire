@@ -4,13 +4,14 @@ import (
 	"time"
 )
 
-// Using our own model struct to remove DeletedAt. We don't want soft-delete support.
+// Model is used as a base for other models. Similar to gorm.Model without `DeletedAt`. We don't want soft-delete support.
 type Model struct {
 	ID        uint `gorm:"primary_key"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
+// Bundle holds a trust bundle.
 type Bundle struct {
 	Model
 
@@ -20,6 +21,7 @@ type Bundle struct {
 	FederatedEntries []RegisteredEntry `gorm:"many2many:federated_registration_entries;"`
 }
 
+// AttestedNode holds an attested node (agent)
 type AttestedNode struct {
 	Model
 
@@ -29,10 +31,12 @@ type AttestedNode struct {
 	ExpiresAt    time.Time
 }
 
+// TableName gets table name of AttestedNode
 func (AttestedNode) TableName() string {
 	return "attested_node_entries"
 }
 
+// NodeSelector holds a node selector by spiffe ID
 type NodeSelector struct {
 	Model
 
@@ -41,24 +45,29 @@ type NodeSelector struct {
 	Value    string `gorm:"unique_index:idx_node_resolver_map"`
 }
 
+// TableName gets table name of NodeSelector
 func (NodeSelector) TableName() string {
 	return "node_resolver_map_entries"
 }
 
+// RegisteredEntry holds a registered entity entry
 type RegisteredEntry struct {
 	Model
 
-	EntryID       string `gorm:"unique_index"`
-	SpiffeID      string
-	ParentID      string
+	EntryID  string `gorm:"unique_index"`
+	SpiffeID string
+	ParentID string
+	// TTL of identities derived from this entry
 	TTL           int32
 	Selectors     []Selector
 	FederatesWith []Bundle `gorm:"many2many:federated_registration_entries;"`
 	Admin         bool
 	Downstream    bool
+	// (optional) expiry of this entry
+	Expiry int64
 }
 
-// Keep time simple and easily comparable with UNIX time
+// JoinToken holds a join token
 type JoinToken struct {
 	Model
 
@@ -66,6 +75,7 @@ type JoinToken struct {
 	Expiry int64
 }
 
+// Selector holds a selector by registered entry ID
 type Selector struct {
 	Model
 
@@ -74,6 +84,7 @@ type Selector struct {
 	Value             string `gorm:"unique_index:idx_selector_entry"`
 }
 
+// Migration holds version information
 type Migration struct {
 	Model
 
