@@ -15,6 +15,7 @@ import (
 	"github.com/spiffe/spire/pkg/server/ca"
 	"github.com/spiffe/spire/proto/api/node"
 	"github.com/spiffe/spire/proto/server/upstreamca"
+	"github.com/spiffe/spire/test/clock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +29,7 @@ qQDuoXqa8i3YOPk5fLib4ORzqD9NJFcrKjI+LLtipQe9yu/eY1K0yhBa
 )
 
 type Options struct {
-	Now        func() time.Time
+	Clock      clock.Clock
 	DefaultTTL time.Duration
 	UpstreamCA upstreamca.UpstreamCA
 }
@@ -46,8 +47,8 @@ func New(t *testing.T, trustDomain string, options *Options) *ServerCA {
 	if options == nil {
 		options = new(Options)
 	}
-	if options.Now == nil {
-		options.Now = time.Now
+	if options.Clock == nil {
+		options.Clock = clock.New()
 	}
 	if options.DefaultTTL == 0 {
 		options.DefaultTTL = time.Minute
@@ -56,7 +57,7 @@ func New(t *testing.T, trustDomain string, options *Options) *ServerCA {
 	key, err := pemutil.ParseECPrivateKey(keyPEM)
 	require.NoError(t, err)
 
-	now := options.Now()
+	now := options.Clock.Now()
 	subject := pkix.Name{CommonName: "FAKE SERVER CA"}
 	var certs []*x509.Certificate
 	var bundle []*x509.Certificate
@@ -90,15 +91,21 @@ func (c *ServerCA) Bundle() []*x509.Certificate {
 	return c.bundle
 }
 
-func (c *ServerCA) SignX509SVID(ctx context.Context, csrDER []byte, ttl time.Duration) ([]*x509.Certificate, error) {
-	if ttl <= 0 {
-		ttl = c.options.DefaultTTL
+func (c *ServerCA) SignX509SVID(ctx context.Context, csrDER []byte, params ca.X509Params) ([]*x509.Certificate, error) {
+	if params.TTL <= 0 {
+		params.TTL = c.options.DefaultTTL
 	}
-	now := c.options.Now()
+	now := c.options.Clock.Now()
 	c.sn++
-	template, err := ca.CreateX509SVIDTemplate(csrDER, c.trustDomain, now, now.Add(ttl), big.NewInt(c.sn))
+	template, err := ca.CreateX509SVIDTemplate(csrDER, c.trustDomain, now, now.Add(params.TTL), big.NewInt(c.sn))
 	if err != nil {
 		return nil, err
+	}
+
+	if len(params.DNSList) > 0 {
+		template.Subject.CommonName = params.DNSList[0]
+
+		template.DNSNames = params.DNSList
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, c.certs[0], template.PublicKey, c.signer)
@@ -114,16 +121,18 @@ func (c *ServerCA) SignX509SVID(ctx context.Context, csrDER []byte, ttl time.Dur
 	return append([]*x509.Certificate{cert}, c.certs...), nil
 }
 
-func (c *ServerCA) SignX509CASVID(ctx context.Context, csrDER []byte, ttl time.Duration) ([]*x509.Certificate, error) {
-	if ttl <= 0 {
-		ttl = c.options.DefaultTTL
+func (c *ServerCA) SignX509CASVID(ctx context.Context, csrDER []byte, params ca.X509Params) ([]*x509.Certificate, error) {
+	if params.TTL <= 0 {
+		params.TTL = c.options.DefaultTTL
 	}
-	now := c.options.Now()
+	now := c.options.Clock.Now()
 	c.sn++
-	template, err := ca.CreateServerCATemplate(csrDER, c.trustDomain, now, now.Add(ttl), big.NewInt(c.sn))
+	template, err := ca.CreateServerCATemplate(csrDER, c.trustDomain, now, now.Add(params.TTL), big.NewInt(c.sn))
 	if err != nil {
 		return nil, err
 	}
+
+	// CA SVID does not use DNS SAN/CN
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, c.certs[0], template.PublicKey, c.signer)
 	if err != nil {
@@ -143,6 +152,6 @@ func (c *ServerCA) SignJWTSVID(ctx context.Context, jsr *node.JSR) (string, erro
 	if ttl <= 0 {
 		ttl = c.options.DefaultTTL
 	}
-	expiresAt := time.Now().Add(ttl)
-	return jwtsvid.SignToken(jsr.SpiffeId, jsr.Audience, expiresAt, c.signer, "fakekey")
+	expiresAt := c.options.Clock.Now().Add(ttl)
+	return jwtsvid.NewSigner(jwtsvid.SignerConfig{Clock: c.options.Clock}).SignToken(jsr.SpiffeId, jsr.Audience, expiresAt, c.signer, "fakekey")
 }

@@ -6,14 +6,15 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"time"
 
 	"github.com/imkira/go-observer"
 	"github.com/spiffe/spire/pkg/common/idutil"
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"github.com/spiffe/spire/pkg/common/util"
+	"github.com/spiffe/spire/pkg/server/ca"
 )
 
+// Rotator is an interface for a SVID rotator
 type Rotator interface {
 	Initialize(ctx context.Context) error
 	Run(ctx context.Context) error
@@ -26,12 +27,9 @@ type rotator struct {
 	c *RotatorConfig
 
 	state observer.Property
-
-	hooks struct {
-		now func() time.Time
-	}
 }
 
+// State is the current SVID and key
 type State struct {
 	SVID []*x509.Certificate
 	Key  *ecdsa.PrivateKey
@@ -53,7 +51,7 @@ func (r *rotator) Subscribe() observer.Stream {
 // Run starts a ticker which monitors the server SVID
 // for expiration and rotates the SVID as necessary.
 func (r *rotator) Run(ctx context.Context) error {
-	t := time.NewTicker(r.c.Interval)
+	t := r.c.Clock.Ticker(r.c.Interval)
 	defer t.Stop()
 
 	for {
@@ -80,7 +78,7 @@ func (r *rotator) shouldRotate() bool {
 		return true
 	}
 
-	ttl := s.SVID[0].NotAfter.Sub(r.hooks.now())
+	ttl := s.SVID[0].NotAfter.Sub(r.c.Clock.Now())
 	watermark := s.SVID[0].NotAfter.Sub(s.SVID[0].NotBefore) / 2
 
 	return (ttl < watermark)
@@ -105,7 +103,7 @@ func (r *rotator) rotateSVID(ctx context.Context) (err error) {
 	}
 
 	// Sign the CSR
-	svid, err := r.c.ServerCA.SignX509SVID(ctx, csr, 0)
+	svid, err := r.c.ServerCA.SignX509SVID(ctx, csr, ca.X509Params{})
 	if err != nil {
 		return err
 	}

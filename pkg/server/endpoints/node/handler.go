@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andres-erbsen/clock"
 	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/pkg/common/bundleutil"
@@ -37,25 +38,22 @@ type HandlerConfig struct {
 	Catalog     catalog.Catalog
 	ServerCA    ca.ServerCA
 	TrustDomain url.URL
+	Clock       clock.Clock
 }
 
 type Handler struct {
 	c       HandlerConfig
 	limiter Limiter
-
-	// test hooks
-	hooks struct {
-		now func() time.Time
-	}
 }
 
 func NewHandler(config HandlerConfig) *Handler {
-	h := &Handler{
+	if config.Clock == nil {
+		config.Clock = clock.New()
+	}
+	return &Handler{
 		c:       config,
 		limiter: NewLimiter(config.Log),
 	}
-	h.hooks.now = time.Now
-	return h
 }
 
 //Attest attests the node and gets the base node SVID.
@@ -141,10 +139,10 @@ func (h *Handler) Attest(stream node.Node_AttestServer) (err error) {
 	}
 
 	h.c.Log.Debugf("Signing CSR for Agent SVID %v", agentID)
-	svid, err := h.c.ServerCA.SignX509SVID(ctx, request.Csr, 0)
+	svid, err := h.c.ServerCA.SignX509SVID(ctx, request.Csr, ca.X509Params{})
 	if err != nil {
 		h.c.Log.Error(err)
-		return errors.New("failed to to sign CSR")
+		return errors.New("failed to sign CSR")
 	}
 
 	if err := h.updateNodeSelectors(ctx, agentID, attestResponse, request.AttestationData.Type); err != nil {
@@ -394,7 +392,7 @@ func (h *Handler) validateAgentSVID(ctx context.Context, cert *x509.Certificate)
 	// rely on TLS handshakes to verify certificate validity since the
 	// certificate on the connection could have expired after the initial
 	// handshake.
-	if h.hooks.now().After(cert.NotAfter) {
+	if h.c.Clock.Now().After(cert.NotAfter) {
 		return fmt.Errorf("agent %q SVID has expired", agentID)
 	}
 
@@ -500,7 +498,7 @@ func (h *Handler) attestToken(ctx context.Context,
 		return nil, err
 	}
 
-	if time.Unix(t.Expiry, 0).Before(h.hooks.now()) {
+	if time.Unix(t.Expiry, 0).Before(h.c.Clock.Now()) {
 		return nil, errors.New("join token expired")
 	}
 
@@ -714,7 +712,12 @@ func (h *Handler) signCSRs(ctx context.Context,
 			if err != nil {
 				return nil, err
 			}
-			svid, err := h.buildCASVID(ctx, csr, e.Ttl)
+			svid, err := h.buildCASVID(ctx, csr,
+				ca.X509Params{
+					TTL: time.Duration(e.Ttl) * time.Second,
+					// CA SVID does not use DNSs
+				},
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -743,7 +746,12 @@ func (h *Handler) buildSVID(ctx context.Context,
 		return nil, fmt.Errorf("not entitled to sign CSR for %q", spiffeID)
 	}
 
-	svid, err := h.c.ServerCA.SignX509SVID(ctx, csr, time.Duration(entry.Ttl)*time.Second)
+	svid, err := h.c.ServerCA.SignX509SVID(ctx, csr,
+		ca.X509Params{
+			TTL:     time.Duration(entry.Ttl) * time.Second,
+			DNSList: entry.DnsNames,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -751,7 +759,7 @@ func (h *Handler) buildSVID(ctx context.Context,
 }
 
 func (h *Handler) buildBaseSVID(ctx context.Context, csr []byte) (*node.X509SVID, *x509.Certificate, error) {
-	svid, err := h.c.ServerCA.SignX509SVID(ctx, csr, 0)
+	svid, err := h.c.ServerCA.SignX509SVID(ctx, csr, ca.X509Params{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -759,8 +767,8 @@ func (h *Handler) buildBaseSVID(ctx context.Context, csr []byte) (*node.X509SVID
 	return makeX509SVID(svid), svid[0], nil
 }
 
-func (h *Handler) buildCASVID(ctx context.Context, csr []byte, ttl int32) (*node.X509SVID, error) {
-	svid, err := h.c.ServerCA.SignX509CASVID(ctx, csr, time.Duration(ttl)*time.Second)
+func (h *Handler) buildCASVID(ctx context.Context, csr []byte, params ca.X509Params) (*node.X509SVID, error) {
+	svid, err := h.c.ServerCA.SignX509CASVID(ctx, csr, params)
 	if err != nil {
 		return nil, err
 	}
@@ -778,26 +786,26 @@ func (h *Handler) getBundlesForEntries(ctx context.Context, regEntries []*common
 	bundles[ourBundle.TrustDomainId] = ourBundle
 
 	for _, entry := range regEntries {
-		for _, trustDomainId := range entry.FederatesWith {
-			if bundles[trustDomainId] != nil {
+		for _, trustDomainID := range entry.FederatesWith {
+			if bundles[trustDomainID] != nil {
 				continue
 			}
-			bundle, err := h.getBundle(ctx, trustDomainId)
+			bundle, err := h.getBundle(ctx, trustDomainID)
 			if err != nil {
 				return nil, err
 			}
-			bundles[trustDomainId] = bundle
+			bundles[trustDomainID] = bundle
 		}
 	}
 	return bundles, nil
 }
 
 // getBundle fetches a bundle from the datastore, by trust domain
-func (h *Handler) getBundle(ctx context.Context, trustDomainId string) (*common.Bundle, error) {
+func (h *Handler) getBundle(ctx context.Context, trustDomainID string) (*common.Bundle, error) {
 	ds := h.c.Catalog.DataStores()[0]
 
 	resp, err := ds.FetchBundle(ctx, &datastore.FetchBundleRequest{
-		TrustDomainId: trustDomainId,
+		TrustDomainId: trustDomainID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch bundle: %v", err)

@@ -20,11 +20,13 @@ import (
 	"github.com/spiffe/spire/pkg/common/pemutil"
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"github.com/spiffe/spire/pkg/common/util"
+	"github.com/spiffe/spire/pkg/server/ca"
 	"github.com/spiffe/spire/proto/api/node"
 	"github.com/spiffe/spire/proto/common"
 	"github.com/spiffe/spire/proto/server/datastore"
 	"github.com/spiffe/spire/proto/server/nodeattestor"
 	"github.com/spiffe/spire/proto/server/noderesolver"
+	"github.com/spiffe/spire/test/clock"
 	"github.com/spiffe/spire/test/fakes/fakedatastore"
 	"github.com/spiffe/spire/test/fakes/fakenoderesolver"
 	"github.com/spiffe/spire/test/fakes/fakeserverca"
@@ -85,14 +87,14 @@ type HandlerSuite struct {
 	attestedClient   node.NodeClient
 	ds               *fakedatastore.DataStore
 	catalog          *fakeservercatalog.Catalog
-	now              time.Time
+	clock            *clock.Mock
 	bundle           *common.Bundle
 	agentSVID        []*x509.Certificate
 	serverCA         *fakeserverca.ServerCA
 }
 
 func (s *HandlerSuite) SetupTest() {
-	s.now = time.Now()
+	s.clock = clock.NewMock(s.T())
 
 	log, logHook := test.NewNullLogger()
 	s.logHook = logHook
@@ -104,9 +106,7 @@ func (s *HandlerSuite) SetupTest() {
 	s.catalog.SetDataStores(s.ds)
 
 	s.serverCA = fakeserverca.New(s.T(), trustDomain, &fakeserverca.Options{
-		Now: func() time.Time {
-			return s.now
-		},
+		Clock: s.clock,
 	})
 	s.bundle = bundleutil.BundleProtoFromRootCAs(trustDomainID, s.serverCA.Bundle())
 
@@ -122,10 +122,8 @@ func (s *HandlerSuite) SetupTest() {
 		Catalog:     s.catalog,
 		ServerCA:    s.serverCA,
 		TrustDomain: *trustDomainURL,
+		Clock:       s.clock,
 	})
-	handler.hooks.now = func() time.Time {
-		return s.now
-	}
 	handler.limiter = s.limiter
 
 	// Streaming methods and auth are easier to test from the client point of view.
@@ -380,7 +378,7 @@ func (s *HandlerSuite) TestAttestWithAlreadyUsedJoinToken() {
 }
 
 func (s *HandlerSuite) TestAttestWithExpiredJoinToken() {
-	s.createJoinToken("TOKEN", s.now.Add(-time.Second))
+	s.createJoinToken("TOKEN", s.clock.Now().Add(-time.Second))
 
 	s.requireAttestFailure(&node.AttestRequest{
 		AttestationData: makeAttestationData("join_token", "TOKEN"),
@@ -392,7 +390,7 @@ func (s *HandlerSuite) TestAttestWithExpiredJoinToken() {
 }
 
 func (s *HandlerSuite) TestAttestWithValidJoinToken() {
-	s.createJoinToken("TOKEN", s.now.Add(time.Second))
+	s.createJoinToken("TOKEN", s.clock.Now().Add(time.Second))
 	s.requireAttestSuccess(&node.AttestRequest{
 		AttestationData: makeAttestationData("join_token", "TOKEN"),
 		Csr:             s.makeCSR("spiffe://example.org/spire/agent/join_token/TOKEN"),
@@ -583,6 +581,7 @@ func (s *HandlerSuite) TestFetchX509SVIDWithDownstreamCSR() {
 		ParentId:   trustDomainID,
 		SpiffeId:   agentID,
 		Downstream: true,
+		DnsNames:   []string{"ca-dns1"},
 	})
 
 	upd := s.requireFetchX509SVIDSuccess(&node.FetchX509SVIDRequest{
@@ -593,7 +592,13 @@ func (s *HandlerSuite) TestFetchX509SVIDWithDownstreamCSR() {
 	// since downstream entries aren't intended for workloads.
 	s.Empty(upd.RegistrationEntries)
 	s.assertBundlesInUpdate(upd)
-	s.assertSVIDsInUpdate(upd, trustDomainID)
+	chains := s.assertSVIDsInUpdate(upd, trustDomainID)
+	for _, chain := range chains {
+		// CA certs should not have DNS names associated with them
+		s.Empty(chain[0].DNSNames)
+		// CA certs should not CN based on DNS names
+		s.Empty(chain[0].Subject.CommonName)
+	}
 }
 
 func (s *HandlerSuite) TestFetchX509SVIDWithWorkloadCSR() {
@@ -608,11 +613,53 @@ func (s *HandlerSuite) TestFetchX509SVIDWithWorkloadCSR() {
 		Csrs: s.makeCSRs(workloadID),
 	})
 
-	// Downstream responses don't contain the downstream registration entry
-	// since downstream entries aren't intended for workloads.
 	s.Equal([]*common.RegistrationEntry{entry}, upd.RegistrationEntries)
 	s.assertBundlesInUpdate(upd)
 	s.assertSVIDsInUpdate(upd, workloadID)
+}
+
+func (s *HandlerSuite) TestFetchX509SVIDWithSingleDNS() {
+	dnsList := []string{"somehost1"}
+
+	s.attestAgent()
+
+	entry := s.createRegistrationEntry(&common.RegistrationEntry{
+		ParentId: agentID,
+		SpiffeId: workloadID,
+		DnsNames: dnsList,
+	})
+
+	upd := s.requireFetchX509SVIDSuccess(&node.FetchX509SVIDRequest{
+		Csrs: s.makeCSRs(workloadID),
+	})
+
+	s.Equal([]*common.RegistrationEntry{entry}, upd.RegistrationEntries)
+	s.assertBundlesInUpdate(upd)
+	chains := s.assertSVIDsInUpdate(upd, workloadID)
+	s.Equal(dnsList, chains[0][0].DNSNames)
+	s.Equal("somehost1", chains[0][0].Subject.CommonName)
+}
+
+func (s *HandlerSuite) TestFetchX509SVIDWithMultipleDNS() {
+	dnsList := []string{"somehost1", "somehost2", "somehost3"}
+
+	s.attestAgent()
+
+	entry := s.createRegistrationEntry(&common.RegistrationEntry{
+		ParentId: agentID,
+		SpiffeId: workloadID,
+		DnsNames: dnsList,
+	})
+
+	upd := s.requireFetchX509SVIDSuccess(&node.FetchX509SVIDRequest{
+		Csrs: s.makeCSRs(workloadID),
+	})
+
+	s.Equal([]*common.RegistrationEntry{entry}, upd.RegistrationEntries)
+	s.assertBundlesInUpdate(upd)
+	chains := s.assertSVIDsInUpdate(upd, workloadID)
+	s.Equal(dnsList, chains[0][0].DNSNames)
+	s.Equal("somehost1", chains[0][0].Subject.CommonName)
 }
 
 func (s *HandlerSuite) TestFetchJWTSVIDWithUnattestedAgent() {
@@ -695,8 +742,8 @@ func (s *HandlerSuite) TestFetchJWTSVIDWithWorkloadID() {
 	})
 
 	s.NotEmpty(svid.Token)
-	s.Equal(s.now.Unix(), svid.IssuedAt)
-	s.Equal(s.now.Add(s.serverCA.DefaultTTL()).Unix(), svid.ExpiresAt)
+	s.Equal(s.clock.Now().Unix(), svid.IssuedAt)
+	s.Equal(s.clock.Now().Add(s.serverCA.DefaultTTL()).Unix(), svid.ExpiresAt)
 }
 
 func (s *HandlerSuite) TestAuthorizeCallUnhandledMethod() {
@@ -771,14 +818,14 @@ func (s *HandlerSuite) testAuthorizeCallRequiringAgentSVID(method string) {
 	s.Require().True(peerCert.Equal(actualCert), "peer certificate matches")
 
 	// expired certificate
-	s.now = peerCert.NotAfter.Add(time.Second)
+	s.clock.Set(peerCert.NotAfter.Add(time.Second))
 	ctx, err = s.handler.AuthorizeCall(peerCtx, fullMethod)
 	s.Require().Error(err)
 	s.Equal("agent is not attested or no longer valid", status.Convert(err).Message())
 	s.Equal(codes.PermissionDenied, status.Code(err))
 	s.assertLastLogMessage(`agent "spiffe://example.org/spire/agent/test/id" SVID has expired`)
 	s.Require().Nil(ctx)
-	s.now = peerCert.NotAfter
+	s.clock.Set(peerCert.NotAfter)
 
 	// serial number does not match
 	s.updateAttestedNode(agentID, "SERIAL NUMBER", peerCert.NotAfter)
@@ -1064,7 +1111,7 @@ func (s *HandlerSuite) assertLastLogMessageContains(contains string) {
 }
 
 func (s *HandlerSuite) makeSVID(spiffeID string) []*x509.Certificate {
-	svid, err := s.serverCA.SignX509SVID(context.Background(), s.makeCSR(spiffeID), 0)
+	svid, err := s.serverCA.SignX509SVID(context.Background(), s.makeCSR(spiffeID), ca.X509Params{})
 	s.Require().NoError(err)
 	return svid
 }
