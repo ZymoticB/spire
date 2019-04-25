@@ -36,7 +36,7 @@ func SortRegistrationEntries(entries []*common.RegistrationEntry) {
 
 	// second, sort the registration entries
 	sort.Slice(entries, func(i, j int) bool {
-		return compareRegistrationEntries(entries[i], entries[j]) < 0
+		return CompareRegistrationEntries(entries[i], entries[j]) < 0
 	})
 }
 
@@ -46,7 +46,7 @@ func SortSelectors(selectors []*common.Selector) {
 	})
 }
 
-func compareRegistrationEntries(a, b *common.RegistrationEntry) int {
+func CompareRegistrationEntries(a, b *common.RegistrationEntry) int {
 	c := strings.Compare(a.SpiffeId, b.SpiffeId)
 	if c != 0 {
 		return c
