@@ -1283,8 +1283,8 @@ func (s *PluginSuite) TestListParentIDEntries() {
 					Value: test.parentID,
 				},
 			})
-			s.Require().NoError(err)
-			s.RequireProtoListEqual(test.expectedList, result.Entries)
+			require.NoError(t, err)
+			spiretest.RequireProtoListEqual(t, test.expectedList, result.Entries)
 		})
 	}
 }

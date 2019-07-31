@@ -70,6 +70,10 @@ type RegisteredEntry struct {
 	DNSList []DNSName
 }
 
+func (RegisteredEntry) TableName() string {
+	return "registered_entries"
+}
+
 // JoinToken holds a join token
 type JoinToken struct {
 	Model

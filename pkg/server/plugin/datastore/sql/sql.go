@@ -3,6 +3,7 @@ package sql
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -1174,19 +1175,14 @@ func listRegistrationEntries(tx *gorm.DB,
 
 	if len(selectorsList) == 0 {
 		// no selectors to filter against.
-		var entries []RegisteredEntry
-		entries, p, err = findRegisteredEntries(entryTx, req.Pagination)
-		if err != nil {
-			return nil, sqlError.Wrap(err)
-		}
-
-		respEntries, err := modelsToEntries(tx, entries)
+		var entries []*common.RegistrationEntry
+		entries, p, err = findRegisteredEntriesFast(entryTx, req.Pagination)
 		if err != nil {
 			return nil, sqlError.Wrap(err)
 		}
 
 		return &datastore.ListRegistrationEntriesResponse{
-			Entries:    respEntries,
+			Entries:    entries,
 			Pagination: p,
 		}, nil
 	}
@@ -1272,6 +1268,135 @@ func updatePaginationToken(p *datastore.Pagination, entries []RegisteredEntry) {
 	}
 	lastEntry := (entries)[len(entries)-1]
 	p.Token = fmt.Sprint(lastEntry.ID)
+}
+
+func findRegisteredEntriesFast(entryTx *gorm.DB, p *datastore.Pagination) ([]*common.RegistrationEntry, *datastore.Pagination, error) {
+	entriesQuery := entryTx.Table("registered_entries").Select("id as limited_eid")
+	// if pagination is not nil and page size is greater than 0, add pagination
+	if p != nil && p.PageSize > 0 {
+		if p.Token == "" {
+			p.Token = "0"
+		}
+
+		id, err := strconv.ParseUint(p.Token, 10, 32)
+		if err != nil {
+			return nil, p, fmt.Errorf("could not parse token '%v'", p.Token)
+		}
+		entriesQuery = entriesQuery.Order("id asc").Limit(p.PageSize).Where("id > ?", id)
+	}
+	// we use a subquery to ensure we can paginate correctly. The limit must be applied
+	// before any joins or we will hydrate partial objects
+	entriesSubquery := entriesQuery.SubQuery()
+
+	entryMap := make(map[string]*common.RegistrationEntry)
+	selectItems := "selectors.type as selector_type, selectors.value as selector_value, trust_domain, dns_names.value as dns_name, registered_entries.entry_id as entry_id, registered_entries.id as e_id, spiffe_id, parent_id, registered_entries.ttl as reg_ttl, admin, downstream, expiry"
+	query := entryTx.Table("registered_entries").Select(selectItems).Joins("JOIN ? AS limited on registered_entries.id=limited.limited_eid", entriesSubquery).Joins("LEFT JOIN dns_names ON dns_names.registered_entry_id=registered_entries.id").Joins("LEFT JOIN selectors ON selectors.registered_entry_id=registered_entries.id").Joins("LEFT JOIN federated_registration_entries ON federated_registration_entries.registered_entry_id=registered_entries.id").Joins("LEFT JOIN bundles ON federated_registration_entries.bundle_id=bundles.id")
+
+	rows, err := query.Rows()
+	if err != nil {
+		return nil, p, err
+	}
+	defer rows.Close()
+
+	type row struct {
+		SelectorType  sql.NullString
+		SelectorValue sql.NullString
+		TrustDomain   sql.NullString
+		DnsName       sql.NullString
+		EntryId       string
+		EId           uint64
+		SpiffeId      string
+		ParentId      string
+		RegTtl        int32
+		Admin         bool
+		Downstream    bool
+		Expiry        int64
+	}
+
+	// hold onto eid as we scan the rows. If pagination is applied
+	// the rows will be sorted by this ID and we need to hold onto
+	// the eid of the last entry to update the pagination token.
+	var eid uint64
+	for rows.Next() {
+		var r row
+		err := rows.Scan(
+			&r.SelectorType,
+			&r.SelectorValue,
+			&r.TrustDomain,
+			&r.DnsName,
+			&r.EntryId,
+			&r.EId,
+			&r.SpiffeId,
+			&r.ParentId,
+			&r.RegTtl,
+			&r.Admin,
+			&r.Downstream,
+			&r.Expiry,
+		)
+		if err != nil {
+			return nil, p, err
+		}
+
+		eid = r.EId
+
+		entry, ok := entryMap[r.EntryId]
+		if !ok {
+			entry = &common.RegistrationEntry{
+				EntryId:     r.EntryId,
+				SpiffeId:    r.SpiffeId,
+				ParentId:    r.ParentId,
+				Ttl:         r.RegTtl,
+				Admin:       r.Admin,
+				Downstream:  r.Downstream,
+				EntryExpiry: r.Expiry,
+			}
+			entryMap[r.EntryId] = entry
+		}
+
+		if r.SelectorType.Valid {
+			if !r.SelectorValue.Valid {
+				return nil, p, errors.New("if selector.type is present, selector.value must be as well")
+			}
+			var selectors []*common.Selector
+			if entry.Selectors != nil {
+				selectors = entry.Selectors
+			}
+			selectors = append(selectors, &common.Selector{
+				Type:  r.SelectorType.String,
+				Value: r.SelectorValue.String,
+			})
+			entry.Selectors = selectors
+		}
+
+		if r.DnsName.Valid {
+			var dnsNames []string
+			if entry.DnsNames != nil {
+				dnsNames = entry.DnsNames
+			}
+			dnsNames = append(dnsNames, r.DnsName.String)
+			entry.DnsNames = dnsNames
+		}
+
+		if r.TrustDomain.Valid {
+			var federatesWith []string
+			if entry.FederatesWith != nil {
+				federatesWith = entry.FederatesWith
+			}
+			federatesWith = append(federatesWith, r.TrustDomain.String)
+			entry.FederatesWith = federatesWith
+		}
+	}
+
+	protoEntries := make([]*common.RegistrationEntry, 0, len(entryMap))
+	for _, entry := range entryMap {
+		protoEntries = append(protoEntries, entry)
+	}
+
+	if p != nil && p.PageSize > 0 && len(protoEntries) > 0 {
+		p.Token = strconv.FormatUint(eid, 10)
+	}
+
+	return protoEntries, p, nil
 }
 
 // find registered entries using pagination in case it is configured
