@@ -90,7 +90,19 @@ Please see the [built-in plugins](#built-in-plugins) section below for informati
 
 ## Telemetry configuration
 
-If telemetry is desired, it may be configured by using a dedicated `telemetry { ... }` section. Prometheus, Statsd, and DogStatsd are currently supported. You may use all, some, or none. Statsd and DogStatsd both support multiple declarations in the event that you want to send metrics to more than one collector. Here is a sample configuration:
+If telemetry is desired, it may be configured by using a dedicated `telemetry { ... }` section. The following metrics collectors are currently supported:
+- Prometheus
+- Statsd
+- DogStatsd
+- M3
+
+You may use all, some, or none. The following collectors support multiple declarations in the event that you want to send metrics to more than one collector:
+
+- Statsd
+- DogStatsd
+- M3
+
+Here is a sample configuration:
 
 ```hcl
 telemetry {
@@ -109,6 +121,10 @@ telemetry {
         Statsd {
                 address = "collector.example.org:8125"
         }
+
+        M3 = [
+            { address = "localhost:9052" env = "prod" }
+        ]
 }
 ```
 
